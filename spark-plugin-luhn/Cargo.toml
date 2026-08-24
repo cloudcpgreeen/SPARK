@@ -3,6 +3,8 @@ name = "spark-plugin-luhn"
 version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreeen/SPARK"
+description = "SPARK 核验插件：银行卡号 Luhn 校验 + 卡组织识别"
 
 [lib]
 crate-type = ["cdylib"]

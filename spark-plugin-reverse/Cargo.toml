@@ -3,6 +3,8 @@ name = "spark-plugin-reverse"
 version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreeen/SPARK"
+description = "SPARK 示例插件：输入倒序"
 
 [lib]
 crate-type = ["cdylib"]

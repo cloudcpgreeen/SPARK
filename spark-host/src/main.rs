@@ -65,7 +65,11 @@ fn pipe(host: &Host, input: &str, names: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(PipeFailure::Declined { step, error }) => {
-            eprintln!("✗ 未通过 {step} [{code}]: {message}", code = error.code, message = error.message);
+            eprintln!(
+                "✗ 未通过 {step} [{code}]: {message}",
+                code = error.code,
+                message = error.message
+            );
             ExitCode::from(1)
         }
         Err(PipeFailure::Trap { step, detail }) => {
@@ -79,14 +83,24 @@ fn pipe(host: &Host, input: &str, names: &[String]) -> ExitCode {
 fn run_path(host: &Host, wasm: &str, input: &str) -> ExitCode {
     match host.run(wasm, input) {
         Ok((info, Ok(out))) => {
-            println!("plugin: {} {} — {}", info.name, info.version, info.description);
+            println!(
+                "plugin: {} {} — {}",
+                info.name, info.version, info.description
+            );
             println!("output: {out}");
             ExitCode::SUCCESS
         }
         Ok((info, Err(error))) => {
             // 插件声明式失败：结果是 err，不是崩溃。
-            println!("plugin: {} {} — {}", info.name, info.version, info.description);
-            eprintln!("plugin error [{code}]: {message}", code = error.code, message = error.message);
+            println!(
+                "plugin: {} {} — {}",
+                info.name, info.version, info.description
+            );
+            eprintln!(
+                "plugin error [{code}]: {message}",
+                code = error.code,
+                message = error.message
+            );
             ExitCode::SUCCESS
         }
         Err(e) => {

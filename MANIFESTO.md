@@ -97,8 +97,15 @@ SPARK 对不可信插件的立场：**默认不可信，一切攻击在沙箱内
 
 | 文档 | 内容 |
 | --- | --- |
-| [CONTRACT.md](CONTRACT.md) | 契约约定：接口即契约，契约即 WIT；版本规则 |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | 开发约定：结构、构建测试、风格、流程 |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | 交付约定：门禁、版本发布、运行配置 |
+| [CONTRACT.md](CONTRACT.md) | 约定一：契约即 WIT；版本规则 |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | 约定二：结构、构建测试、风格、流程 |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | 约定三：门禁、版本发布、运行配置 |
 | [SECURITY.md](SECURITY.md) | 安全：威胁模型、上报流程 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 架构与实现：框架怎么形成的 |
+| [EXAMPLES.md](EXAMPLES.md) | 使用范例：手把手跑一遍 |
+| [RELATIONSHIPS.md](RELATIONSHIPS.md) | 人物关系图：一张网收束 |
+| [REFERENCE.md](REFERENCE.md) | 技术参考：契约原文 / API / 沙箱 / 错误码 / CLI |
+| [ESSAY.md](ESSAY.md) | 理念外：论论文安全 |
+| [CURIOSITY.md](CURIOSITY.md) / [LOVE.md](LOVE.md) | 理念外·最童趣篇：好奇心够了，但爱是最好的 |
 | [README.md](README.md) | 门面：快速上手 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) / [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | 社区：贡献指南、行为准则 |

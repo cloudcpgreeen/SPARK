@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: SECURITY 上报流程
+    url: https://github.com/cloudcpgreeen/SPARK/blob/main/SECURITY.md
+    about: 安全漏洞请走 SECURITY 上报流程，不要开公开 issue

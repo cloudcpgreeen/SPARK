@@ -16,8 +16,9 @@ fn expect_ok<T, E>(r: Result<T, E>) -> T {
 /// 已构建的组件路径（产物名 = 目录名连字符转下划线 + `.wasm`）。
 fn built_wasm(plugin_dir: &str) -> Option<PathBuf> {
     let wasm_name = format!("{}.wasm", plugin_dir.replace('-', "_"));
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../{plugin_dir}/target/wasm32-unknown-unknown/release/{wasm_name}"));
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../{plugin_dir}/target/wasm32-unknown-unknown/release/{wasm_name}"
+    ));
     p.exists().then_some(p)
 }
 

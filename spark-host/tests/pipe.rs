@@ -7,8 +7,9 @@ use spark_host::{Host, PipeFailure};
 
 fn built_wasm(plugin_dir: &str) -> Option<PathBuf> {
     let wasm_name = format!("{}.wasm", plugin_dir.replace('-', "_"));
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../{plugin_dir}/target/wasm32-unknown-unknown/release/{wasm_name}"));
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../{plugin_dir}/target/wasm32-unknown-unknown/release/{wasm_name}"
+    ));
     p.exists().then_some(p)
 }
 
@@ -76,7 +77,10 @@ fn pipe_fails_fast_on_trap() {
     match host.pipe(&dir, "trap-x", &["upper", "reverse"]) {
         Err(PipeFailure::Trap { step, detail }) => {
             assert_eq!(step, "upper");
-            assert!(detail.contains("wasm backtrace"), "trap 细节应含 wasm backtrace: {detail}");
+            assert!(
+                detail.contains("wasm backtrace"),
+                "trap 细节应含 wasm backtrace: {detail}"
+            );
         }
         other => panic!("trap 输入应 fail-fast：得 {other:?}"),
     }

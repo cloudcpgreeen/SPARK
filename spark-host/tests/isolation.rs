@@ -14,8 +14,9 @@ fn expect_ok<T, E>(r: Result<T, E>) -> T {
 /// 插件目录名 → 组件路径（产物名 = 目录名连字符转下划线 + `.wasm`）。
 fn component_path(plugin_dir: &str) -> Option<String> {
     let wasm = format!("{}.wasm", plugin_dir.replace('-', "_"));
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../{plugin_dir}/target/wasm32-unknown-unknown/release/{wasm}"));
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../{plugin_dir}/target/wasm32-unknown-unknown/release/{wasm}"
+    ));
     p.exists().then(|| p.to_string_lossy().into_owned())
 }
 

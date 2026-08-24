@@ -1,8 +1,13 @@
 [package]
 name = "spark-host"
-version = "0.1.0"
-edition = "2021"
-license = "GPL-3.0-only"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SPARK 宿主：wasmtime 沙箱加载调用满足 spark:runtime 契约的 WASM 组件"
+keywords = ["wasm", "wasmtime", "component", "sandbox", "plugin"]
+categories = ["wasm", "development-tools"]
+readme = "../README.md"
 
 [dependencies]
 anyhow = "1"

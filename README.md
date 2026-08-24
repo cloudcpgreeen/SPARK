@@ -1,7 +1,10 @@
 # SPARK
 
 > 组件运行时：领域逻辑写成满足 `spark:runtime` 契约的 WASM 组件，宿主沙箱加载调用。契约即 WIT。
-> 开源协议：[GPL-3.0](LICENSE)。
+
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![CI](https://github.com/cloudcpgreeen/SPARK/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudcpgreeen/SPARK/actions/workflows/ci.yml)
+[![GitHub tag](https://img.shields.io/github/v/tag/cloudcpgreeen/SPARK)](https://github.com/cloudcpgreeen/SPARK/releases)
 
 ## 文档
 
@@ -19,6 +22,12 @@
 | [`ESSAY.md`](ESSAY.md) | 理念外一篇：论论文安全——不是防学生，是护写作者 |
 | [`CURIOSITY.md`](CURIOSITY.md) | 理念外·最童趣篇之一：好奇心就够了（Curiosity is All You Need） |
 | [`LOVE.md`](LOVE.md) | 理念外·最童趣篇之二：但爱是最好的（But Love is The Best）——整个故事的钥匙 |
+
+## 社区
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — 贡献指南（契约优先、提 PR 前检查单）
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — 行为准则
+- [CHANGELOG.md](CHANGELOG.md) — 变更日志
 
 ## 结构
 

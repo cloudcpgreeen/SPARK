@@ -1,3 +1,11 @@
 [workspace]
 members = ["spark-core", "spark-host"]
 resolver = "2"
+
+# 工作区共享元数据：spark-core / spark-host 经 workspace = true 继承。
+# 插件（spark-plugin*）是独立 workspace，各自声明。
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreeen/SPARK"

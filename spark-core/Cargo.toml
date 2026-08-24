@@ -1,7 +1,12 @@
 [package]
 name = "spark-core"
-version = "0.1.0"
-edition = "2021"
-license = "GPL-3.0-only"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SPARK 核心契约：无 HTTP 领域库的骨架 crate，钉死 spark:core@0.1.0"
+keywords = ["wasm", "wit", "component", "runtime", "sandbox"]
+categories = ["wasm", "development-tools"]
+readme = "../README.md"
 
 [dependencies]

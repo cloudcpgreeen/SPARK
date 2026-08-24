@@ -16,7 +16,9 @@ mod tests {
         let parts: Vec<&str> = v.split('.').collect();
         assert_eq!(parts.len(), 3, "contract version must be semver, got {v}");
         assert!(
-            parts.iter().all(|p| !p.is_empty() && p.parse::<u64>().is_ok()),
+            parts
+                .iter()
+                .all(|p| !p.is_empty() && p.parse::<u64>().is_ok()),
             "contract version parts must be numeric, got {v}"
         );
     }

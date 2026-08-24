@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: fmt · clippy · unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  plugins:
+    name: plugins · full integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cargo-component
+      - name: Install cargo-component
+        run: cargo install cargo-component --version 0.21.1 --locked
+      - name: Add wasm32-unknown-unknown target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Build all plugin components
+        run: |
+          for dir in spark-plugin spark-plugin-reverse spark-plugin-attacker spark-plugin-idcard spark-plugin-luhn; do
+            echo "== building $dir =="
+            cargo component build --release --manifest-path "$dir/Cargo.toml"
+          done
+      - name: Full integration test (all 18, nothing skipped)
+        run: cargo test --workspace

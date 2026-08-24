@@ -3,6 +3,8 @@ name = "spark-plugin-idcard"
 version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreeen/SPARK"
+description = "SPARK 核验插件：中国身份证号（GB 11643-1999）18 位校验，返回性别/生日/地区或结构化错误"
 
 [lib]
 crate-type = ["cdylib"]

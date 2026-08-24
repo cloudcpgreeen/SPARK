@@ -12,9 +12,8 @@ fn expect_ok<T, E>(r: Result<T, E>) -> T {
 }
 
 fn luhn_wasm() -> Option<String> {
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
-        "../spark-plugin-luhn/target/wasm32-unknown-unknown/release/spark_plugin_luhn.wasm",
-    );
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../spark-plugin-luhn/target/wasm32-unknown-unknown/release/spark_plugin_luhn.wasm");
     p.exists().then(|| p.to_string_lossy().into_owned())
 }
 

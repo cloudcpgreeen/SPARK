@@ -3,6 +3,8 @@ name = "spark-plugin-attacker"
 version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreeen/SPARK"
+description = "SPARK 安全验证插件：CPU/内存炸弹，被沙箱切断（自食其果）"
 
 [lib]
 crate-type = ["cdylib"]
