@@ -1,6 +1,7 @@
 # SPARK
 
 > 组件运行时：领域逻辑写成满足 `spark:runtime` 契约的 WASM 组件，宿主沙箱加载调用。契约即 WIT。
+> 开源协议：[GPL-3.0](LICENSE)。
 
 ## 三份约定
 
