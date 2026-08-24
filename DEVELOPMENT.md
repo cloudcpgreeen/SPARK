@@ -33,7 +33,7 @@ cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/sp
 ```
 
 - 插件组件固定 `--target wasm32-unknown-unknown`（`.cargo/config.toml` 已钉死），产物零 WASI import，纯粹导出 `spark:runtime/plugin`。
-- `spark-host` 集成测试（`tests/isolation.rs`）覆盖 happy path / trap 捕获 / trap 后隔离 / 多插件可插拔 / 攻击者切断；组件未构建时自动跳过（先执行上面的 `cargo component build`）。
+- `spark-host` 集成测试覆盖 happy path / 声明式失败（`result` 的 err）/ trap 捕获 / trap 后隔离 / 多插件可插拔 / 攻击者切断（`tests/isolation.rs`）与插件自注册、按 name 解析运行（`tests/registry.rs`）；组件未构建时自动跳过（先执行上面的 `cargo component build`）。
 - 沙箱资源有界：CPU 走 epoch 时间预算、内存走 StoreLimits（见 [SECURITY.md](SECURITY.md)）。
 - 测试不依赖网络/外部服务。
 

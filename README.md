@@ -26,7 +26,17 @@ cd spark-plugin && cargo component build --release
 cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/spark_plugin.wasm "hello"
 ```
 
-示例插件 `Upper`：输入转大写；输入以 `trap` 开头时触发 panic，宿主以 trap 捕获、进程不崩（沙箱隔离）。
+示例插件 `Upper`：输入转大写；输入以 `trap` 开头时触发 panic，宿主以 trap 捕获、进程不崩（沙箱隔离）；输入以 `err` 开头时返回声明式错误（值，不是崩溃）。
+
+### 插件自注册（注册/发现）
+
+把满足 `plugin-world` 契约的 `.wasm` 组件放进 `plugins/` 目录即注册（name 来自组件自身 `info()`，宿主零配置文件）：
+
+```bash
+mkdir -p plugins && cp spark-plugin/target/wasm32-unknown-unknown/release/spark_plugin.wasm plugins/
+cargo run -p spark-host -- list           # 发现并列出
+cargo run -p spark-host -- run upper hi   # 按名字运行
+```
 
 ## 新增插件
 
