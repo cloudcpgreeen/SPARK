@@ -28,3 +28,5 @@ cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/sp
 ## 新增插件
 
 写一个满足 `plugin-world` 契约的组件（见 `wit/runtime.wit`），宿主零改动即可加载。
+
+现有示例插件：`spark-plugin`（upper，输入转大写）、`spark-plugin-reverse`（reverse，输入倒序）。两个插件用同一个 `spark-host` 二进制加载（见 `spark-host/tests/isolation.rs` 的 `second_plugin_same_host`）。
