@@ -8,7 +8,7 @@
 
 mod bindings;
 
-use bindings::exports::spark::runtime::plugin::{Guest, PluginInfo};
+use bindings::exports::spark::runtime::plugin::{Guest, PluginError, PluginInfo};
 
 struct Attacker;
 
@@ -21,7 +21,7 @@ impl Guest for Attacker {
         }
     }
 
-    fn transform(input: String) -> Result<String, String> {
+    fn transform(input: String) -> Result<String, PluginError> {
         match input.as_str() {
             "loop" => {
                 let mut x: u64 = 1;

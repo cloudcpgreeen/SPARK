@@ -1,24 +1,31 @@
 // SPARK 契约 · spark:runtime（约定见 CONTRACT.md）。
 // 组件运行时：插件即组件 —— 领域逻辑做成满足此契约的 WASM 组件，宿主沙箱加载并调用。
 
-package spark:runtime@0.2.0;
+package spark:runtime@0.3.0;
 
 /// 插件接口：宿主（spark-host）对已加载组件唯一的调用面。
 interface plugin {
-  /// 插件元数据：宿主展示 / 日志 / 未来注册发现用。
+  /// 插件元数据：宿主展示 / 日志 / 注册发现用。
   record plugin-info {
     name: string,
     version: string,
     description: string,
   }
 
+  /// 结构化错误：`code` 供调用方编程区分失败种类（如 `"length"` / `"checksum"`），
+  /// `message` 供人读。失败语义从「字符串猜测」升级为「可编程分支」。
+  record plugin-error {
+    code: string,
+    message: string,
+  }
+
   /// 插件信息：名字、版本、一句话描述。
   info: func() -> plugin-info;
 
   /// 对输入做一次变换并返回结果。成功返回 `ok`；插件可主动声明失败返回 `err`
-  /// （如无法处理该输入），也可对特定输入 panic（trap）。
+  /// （结构化错误，见 `plugin-error`），也可对特定输入 panic（trap）。
   /// 宿主必须把 `err` 与 trap 都当作可恢复错误处理（沙箱隔离）。
-  transform: func(input: string) -> result<string, string>;
+  transform: func(input: string) -> result<string, plugin-error>;
 }
 
 /// 世界：一个可被宿主实例化的插件组件 = 导出 plugin 接口，不依赖宿主任何能力。

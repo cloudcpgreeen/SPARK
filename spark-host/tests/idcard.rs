@@ -3,6 +3,14 @@
 
 use spark_host::Host;
 
+/// 解开 Ok；失败则 panic（PluginError 未实现 PartialEq，不能直接 assert_eq 整个 Result）。
+fn expect_ok<T, E>(r: Result<T, E>) -> T {
+    match r {
+        Ok(v) => v,
+        Err(_) => panic!("期望成功，实际失败"),
+    }
+}
+
 fn idcard_wasm() -> Option<String> {
     let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
         "../spark-plugin-idcard/target/wasm32-unknown-unknown/release/spark_plugin_idcard.wasm",
@@ -19,9 +27,9 @@ fn valid_id_extracts_info() {
     let host = Host::new().unwrap();
     let (info, out) = host.run(&wasm, "110101199001010015").unwrap();
     assert_eq!(info.name, "idcard");
-    assert_eq!(out, Ok("男 · 1990-01-01 · 地区 110101".into()));
+    assert_eq!(expect_ok(out), "男 · 1990-01-01 · 地区 110101");
     let (_, out) = host.run(&wasm, "110101199001010023").unwrap();
-    assert_eq!(out, Ok("女 · 1990-01-01 · 地区 110101".into()));
+    assert_eq!(expect_ok(out), "女 · 1990-01-01 · 地区 110101");
 }
 
 #[test]
@@ -32,13 +40,17 @@ fn invalid_id_returns_declared_errors() {
     };
     let host = Host::new().unwrap();
     let cases = [
-        ("123", "长度错误：应为 18 位"),
-        ("11010A199001010015", "格式错误：前 17 位须为数字"),
-        ("110101199013010015", "出生日期非法"),
-        ("110101199001010010", "校验位错误"),
+        ("123", "length", "长度错误：应为 18 位"),
+        ("11010A199001010015", "format", "格式错误：前 17 位须为数字"),
+        ("110101199013010015", "date", "出生日期非法"),
+        ("110101199001010010", "checksum", "校验位错误"),
     ];
-    for (input, want) in cases {
+    for (input, code, message) in cases {
         let (_, out) = host.run(&wasm, input).unwrap();
-        assert_eq!(out, Err(want.into()), "输入 `{input}` 应报 `{want}`");
+        let Err(error) = out else {
+            panic!("输入 `{input}` 应报 `{code}`");
+        };
+        assert_eq!(error.code, code);
+        assert_eq!(error.message, message);
     }
 }

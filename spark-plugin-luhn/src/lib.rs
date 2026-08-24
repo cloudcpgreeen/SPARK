@@ -4,13 +4,20 @@
 //! - Luhn：从右起每两位取一位翻倍（翻倍结果 ≥10 则个位十位相加），全部求和后 mod 10 == 0；
 //! - 卡组织识别（按号段前缀）：4 → Visa，51–55 → Mastercard，34/37 → Amex，62 → UnionPay；
 //! - 校验顺序：长度（13–19 位）→ 全数字 → 校验位。
-//! 成功返回 `有效 · 卡组织`；失败返回 err（值，不是 trap）。
+//! 成功返回 `有效 · 卡组织`；失败返回带 code 的 err（length/format/checksum，非 trap）。
 
 mod bindings;
 
-use bindings::exports::spark::runtime::plugin::{Guest, PluginInfo};
+use bindings::exports::spark::runtime::plugin::{Guest, PluginError, PluginInfo};
 
 struct Luhn;
+
+fn err(code: &str, message: &str) -> PluginError {
+    PluginError {
+        code: code.into(),
+        message: message.into(),
+    }
+}
 
 fn luhn_ok(digits: &[u8]) -> bool {
     let sum: u32 = digits
@@ -57,20 +64,20 @@ impl Guest for Luhn {
         }
     }
 
-    fn transform(input: String) -> Result<String, String> {
+    fn transform(input: String) -> Result<String, PluginError> {
         let id = input.trim();
         if !(13..=19).contains(&id.len()) {
-            return Err("长度错误：应为 13–19 位".into());
+            return Err(err("length", "长度错误：应为 13–19 位"));
         }
         let Some(digits) = id
             .chars()
             .map(|c| c.to_digit(10).map(|d| d as u8))
             .collect::<Option<Vec<_>>>()
         else {
-            return Err("格式错误：只能包含数字".into());
+            return Err(err("format", "格式错误：只能包含数字"));
         };
         if !luhn_ok(&digits) {
-            return Err("校验位错误".into());
+            return Err(err("checksum", "校验位错误"));
         }
         Ok(format!("有效 · {}", brand(id)))
     }

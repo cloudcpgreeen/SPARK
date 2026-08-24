@@ -62,10 +62,10 @@ fn run_path(host: &Host, wasm: &str, input: &str) -> ExitCode {
             println!("output: {out}");
             ExitCode::SUCCESS
         }
-        Ok((info, Err(msg))) => {
+        Ok((info, Err(error))) => {
             // 插件声明式失败：结果是 err，不是崩溃。
             println!("plugin: {} {} — {}", info.name, info.version, info.description);
-            eprintln!("plugin error: {msg}");
+            eprintln!("plugin error [{code}]: {message}", code = error.code, message = error.message);
             ExitCode::SUCCESS
         }
         Err(e) => {

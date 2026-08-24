@@ -5,6 +5,14 @@ use std::path::PathBuf;
 
 use spark_host::Host;
 
+/// 解开 Ok；失败则 panic（PluginError 未实现 PartialEq，不能直接 assert_eq 整个 Result）。
+fn expect_ok<T, E>(r: Result<T, E>) -> T {
+    match r {
+        Ok(v) => v,
+        Err(_) => panic!("期望成功，实际失败"),
+    }
+}
+
 /// 已构建的组件路径（产物名 = 目录名连字符转下划线 + `.wasm`）。
 fn built_wasm(plugin_dir: &str) -> Option<PathBuf> {
     let wasm_name = format!("{}.wasm", plugin_dir.replace('-', "_"));
@@ -65,5 +73,5 @@ fn discovered_plugin_run_by_name() {
         .unwrap();
     let (rinfo, out) = host.run(&format!("{dir}/{file}"), "hello").unwrap();
     assert_eq!(rinfo.name, info.name);
-    assert_eq!(out, Ok("olleh".into()));
+    assert_eq!(expect_ok(out), "olleh");
 }

@@ -3,6 +3,14 @@
 
 use spark_host::Host;
 
+/// 解开 Ok；失败则 panic（PluginError 未实现 PartialEq/Debug，不能直接 assert_eq 整个 Result）。
+fn expect_ok<T, E>(r: Result<T, E>) -> T {
+    match r {
+        Ok(v) => v,
+        Err(_) => panic!("期望成功，实际失败"),
+    }
+}
+
 /// 插件目录名 → 组件路径（产物名 = 目录名连字符转下划线 + `.wasm`）。
 fn component_path(plugin_dir: &str) -> Option<String> {
     let wasm = format!("{}.wasm", plugin_dir.replace('-', "_"));
@@ -23,7 +31,7 @@ fn happy_path() {
     let (info, out) = host.run(&wasm, "hello").unwrap();
     assert_eq!(info.name, "upper");
     assert_eq!(info.version, "0.2.0");
-    assert_eq!(out, Ok("HELLO".into()));
+    assert_eq!(expect_ok(out), "HELLO");
 }
 
 #[test]
@@ -36,10 +44,15 @@ fn declared_error_not_trap() {
     let host = Host::new().unwrap();
     let (info, out) = host.run(&wasm, "err-x").unwrap();
     assert_eq!(info.name, "upper");
-    let Err(msg) = out else {
-        panic!("err 开头应返回声明式 err，而非 ok: {out:?}");
+    let Err(error) = out else {
+        panic!("err 开头应返回声明式 err，而非 ok");
     };
-    assert!(!msg.contains("wasm backtrace"), "声明式错误不是 trap: {msg}");
+    assert_eq!(error.code, "rejected");
+    assert!(
+        !error.message.contains("wasm backtrace"),
+        "声明式错误不是 trap: {}",
+        error.message
+    );
 }
 
 #[test]
@@ -66,7 +79,7 @@ fn isolated_after_trap() {
     assert!(host.run(&wasm, "trap-x").is_err());
     let (info, out) = host.run(&wasm, "ok").unwrap();
     assert_eq!(info.name, "upper");
-    assert_eq!(out, Ok("OK".into()));
+    assert_eq!(expect_ok(out), "OK");
 }
 
 #[test]
@@ -79,7 +92,7 @@ fn second_plugin_same_host() {
     let host = Host::new().unwrap();
     let (info, out) = host.run(&wasm, "hello").unwrap();
     assert_eq!(info.name, "reverse");
-    assert_eq!(out, Ok("olleh".into()));
+    assert_eq!(expect_ok(out), "olleh");
 }
 
 #[test]
@@ -92,7 +105,7 @@ fn attacker_cpu_bomb_cut_off() {
     let host = Host::new().unwrap();
     let (info, out) = host.run(&wasm, "hello").unwrap();
     assert_eq!(info.name, "attacker");
-    assert_eq!(out, Ok("hello".into()));
+    assert_eq!(expect_ok(out), "hello");
     let e = host.run(&wasm, "loop").unwrap_err();
     assert!(
         e.to_string().contains("wasm backtrace"),

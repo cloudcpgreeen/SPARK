@@ -3,7 +3,7 @@
 
 mod bindings;
 
-use bindings::exports::spark::runtime::plugin::{Guest, PluginInfo};
+use bindings::exports::spark::runtime::plugin::{Guest, PluginError, PluginInfo};
 
 struct Reverse;
 
@@ -16,7 +16,7 @@ impl Guest for Reverse {
         }
     }
 
-    fn transform(input: String) -> Result<String, String> {
+    fn transform(input: String) -> Result<String, PluginError> {
         Ok(input.chars().rev().collect())
     }
 }

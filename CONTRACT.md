@@ -12,7 +12,7 @@
 WIT package 使用 `spark:<module>@<version>` 形式：
 
 - `spark:core@0.1.0` — 核心领域契约（`wit/core.wit`，骨架）。
-- `spark:runtime@0.2.0` — 组件运行时契约（`wit/runtime.wit`）：`plugin` 接口（`info` 元数据 + `transform` 返回 `result<string, string>`）+ `plugin-world` 世界。插件 = 导出此世界的组件。
+- `spark:runtime@0.3.0` — 组件运行时契约（`wit/runtime.wit`）：`plugin` 接口（`info` 元数据 + `transform` 返回 `result<string, plugin-error>`，错误带结构化 `code`/`message`）+ `plugin-world` 世界。插件 = 导出此世界的组件。
 - 未来按领域拆模块：`spark:order@x.y.z`、`spark:identity@x.y.z` 等，一个模块一个 package。
 
 ## 3. 契约优先工作流（idea 落地第一步）
@@ -23,7 +23,7 @@ WIT package 使用 `spark:<module>@<version>` 形式：
 2. **实现**：按接口实现；接口没声明的能力不做。
 3. **验收**：用契约验收——测试按接口语义断言（输入 → 期望输出），契约变更必须先改 WIT 再改实现。
 
-> 当前阶段：`spark:runtime@0.2.0` 已落地 —— `transform` 返回 `result<string, string>`（插件可声明式失败，无需 panic）、`info` 携带插件元数据（见 `wit/runtime.wit`），配套 `spark-plugin`（Upper）/`spark-plugin-reverse`/`spark-plugin-attacker` 与 `spark-host`（wasmtime 宿主，bindgen 钉死 0.2.0 契约，加载不匹配组件直接失败）。
+> 当前阶段：`spark:runtime@0.3.0` 已落地 —— `transform` 返回 `result<string, plugin-error>`（插件可声明式失败并给出结构化 `code`/`message`，无需 panic）、`info` 携带插件元数据（见 `wit/runtime.wit`），配套 `spark-plugin`（Upper）/`spark-plugin-reverse`/`spark-plugin-attacker`/`spark-plugin-idcard`/`spark-plugin-luhn` 与 `spark-host`（wasmtime 宿主，bindgen 钉死 0.3.0 契约，加载不匹配组件直接失败；支持多插件流水线 `pipe`）。
 
 ## 4. 版本规则
 

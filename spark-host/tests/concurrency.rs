@@ -6,6 +6,14 @@ use std::thread;
 
 use spark_host::Host;
 
+/// 解开 Ok；失败则 panic（PluginError 未实现 PartialEq，不能直接 assert_eq 整个 Result）。
+fn expect_ok<T, E>(r: Result<T, E>) -> T {
+    match r {
+        Ok(v) => v,
+        Err(_) => panic!("期望成功，实际失败"),
+    }
+}
+
 fn built_wasm(plugin_dir: &str) -> Option<PathBuf> {
     let wasm_name = format!("{}.wasm", plugin_dir.replace('-', "_"));
     let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -33,9 +41,9 @@ fn concurrent_calls_share_host_and_stay_isolated() {
                     assert!(host.run(&upper.to_string_lossy(), "trap-x").is_err());
                 }
                 let (_, out) = host.run(&upper.to_string_lossy(), "hello").unwrap();
-                assert_eq!(out, Ok("HELLO".into()));
+                assert_eq!(expect_ok(out), "HELLO");
                 let (_, out2) = host.run(&reverse.to_string_lossy(), "hi").unwrap();
-                assert_eq!(out2, Ok("ih".into()));
+                assert_eq!(expect_ok(out2), "ih");
             })
         })
         .collect();

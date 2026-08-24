@@ -1,9 +1,9 @@
 //! SPARK 宿主：沙箱加载满足 `plugin-world` 契约的 WASM 组件并调用插件接口。
 //!
-//! 契约见 `wit/runtime.wit`（`spark:runtime@0.2.0`）。插件导出 `spark:runtime/plugin`，
+//! 契约见 `wit/runtime.wit`（`spark:runtime@0.3.0`）。插件导出 `spark:runtime/plugin`，
 //! 不依赖宿主任何能力。宿主 bindgen 钉死契约版本：加载不匹配组件时 instantiate 直接失败。
-//! 插件 `transform` 返回 `result<string, string>`：声明式 `err`（值）与 panic（trap）
-//! 都是可恢复错误，宿主不崩。
+//! 插件 `transform` 返回 `result<string, plugin-error>`（`code`/`message` 结构化错误）：
+//! 声明式 `err`（值，可按 code 分支）与 panic（trap）都是可恢复错误，宿主不崩。
 //!
 //! **宿主 = [`Host`]**：长存共享 Engine + 组件编译缓存 + 一个 epoch bump 线程。
 //! 每次 `run`/`info` 新建独立 Store（沙箱隔离不变，实例互不污染），`Host` 方法取 `&self`，
@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::exports::spark::runtime::plugin::PluginInfo;
+use crate::exports::spark::runtime::plugin::{PluginError, PluginInfo};
 use anyhow::Result;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
@@ -92,13 +92,13 @@ impl Host {
     }
 
     /// 调用一次 `info()` 与 `transform(input)`。
-    /// 返回 `(插件信息, 变换结果)`；`transform` 的 `Err` 是插件声明式失败（值，非崩溃），
-    /// 外层 `Err` 才是宿主/沙箱错误（trap、加载失败、资源越限）。
+    /// 返回 `(插件信息, 变换结果)`；`transform` 的 `Err` 是插件声明式失败（结构化
+    /// [`PluginError`]，值，非崩溃），外层 `Err` 才是宿主/沙箱错误（trap、加载失败、资源越限）。
     pub fn run(
         &self,
         wasm_path: &str,
         input: &str,
-    ) -> Result<(PluginInfo, std::result::Result<String, String>)> {
+    ) -> Result<(PluginInfo, std::result::Result<String, PluginError>)> {
         let component = self.component(wasm_path)?;
         let linker = Linker::new(&self.engine);
         let mut store = new_store(&self.engine);
@@ -146,6 +146,7 @@ impl Host {
         }
         found
     }
+
 }
 
 impl Drop for Host {
@@ -167,6 +168,6 @@ fn new_store(engine: &Engine) -> Store<HostData> {
     };
     let mut store = Store::new(engine, host);
     store.limiter(|data| &mut data.limits);
-    store.set_epoch_deadline(1); // 当前 epoch +1：bumper 下一次 bump 即触发
+    store.set_epoch_deadline(2); // 当前 epoch +2：留一格裕量避开 bump 竞态，越界约 10–20ms 内切断
     store
 }

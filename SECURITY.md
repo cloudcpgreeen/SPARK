@@ -19,8 +19,8 @@
 
 - `Host` 长存：共享 Engine + 组件编译缓存 + 一个 epoch bump 线程；每次调用新建独立 Store 与 deadline，实例互不污染。
 - **CPU**：`Config::epoch_interruption(true)` + 后台线程周期性 `Engine::increment_epoch()`，
-  `Store::set_epoch_deadline(1)`。任何执行超过一个 tick（`EPOCH_TICK_MS`，默认 10ms）的
-  wasm 立即被切断。
+  `Store::set_epoch_deadline(2)`（相对当前 epoch 留一格裕量，避开 bump 线程的竞态窗口）。
+  越界执行在约 1–2 个 tick（`EPOCH_TICK_MS`，默认 10ms）内被切断。
   （刻意**不用 fuel 计量**：`loop`/`br` 指令消耗 0 fuel，空死循环会漏网。）
 - **内存**：`StoreLimitsBuilder::new().memory_size(MEMORY_LIMIT).trap_on_grow_failure(true)`
   放进 store 宿主数据，`MEMORY_LIMIT` 默认 16 MiB。

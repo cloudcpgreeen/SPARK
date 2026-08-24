@@ -32,10 +32,11 @@ cd spark-plugin-attacker && cargo component build --release # attacker（恶意�
 cd spark-plugin-idcard && cargo component build --release   # idcard（真实业务算法：身份证校验）
 cd spark-plugin-luhn && cargo component build --release     # luhn（真实业务算法：银行卡号校验）
 cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/spark_plugin.wasm <input>
+cargo run -p spark-host -- pipe <input> upper reverse   # 流水线：输出串联，任一步失败即 fail-fast
 ```
 
 - 插件组件固定 `--target wasm32-unknown-unknown`（`.cargo/config.toml` 已钉死），产物零 WASI import，纯粹导出 `spark:runtime/plugin`。
-- `spark-host` 集成测试覆盖 happy path / 声明式失败（`result` 的 err）/ trap 捕获 / trap 后隔离 / 多插件可插拔 / 攻击者切断（`tests/isolation.rs`）、插件自注册与按 name 解析运行（`tests/registry.rs`）、共享 `Host` 多线程并发调用且 trap 不串（`tests/concurrency.rs`）；组件未构建时自动跳过（先执行上面的 `cargo component build`）。
+- `spark-host` 集成测试覆盖 happy path / 声明式失败（`result` 的 err，`code` 可断言）/ trap 捕获 / trap 后隔离 / 多插件可插拔 / 攻击者切断（`tests/isolation.rs`）、插件自注册与按 name 解析运行（`tests/registry.rs`）、共享 `Host` 多线程并发调用且 trap 不串（`tests/concurrency.rs`）、流水线输出串联与 fail-fast 定位（`tests/pipe.rs`）；组件未构建时自动跳过（先执行上面的 `cargo component build`）。
 - 沙箱资源有界：CPU 走 epoch 时间预算、内存走 StoreLimits（见 [SECURITY.md](SECURITY.md)）。
 - 测试不依赖网络/外部服务。
 
@@ -55,4 +56,4 @@ cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/sp
 ## 5. 测试纪律
 
 - 契约验收测试按接口语义断言（输入 → 期望输出），不测实现细节。
-- `spark-core::contract_version()` 必须与 `wit/core.wit` 的 package 版本对齐（当前 `0.1.0`）；宿主/插件契约版本以 `wit/runtime.wit`（`spark:runtime@0.1.0`）为准——契约与实现脱节是 bug。
+- `spark-core::contract_version()` 必须与 `wit/core.wit` 的 package 版本对齐（当前 `0.1.0`）；宿主/插件契约版本以 `wit/runtime.wit`（`spark:runtime@0.3.0`）为准——契约与实现脱节是 bug。
