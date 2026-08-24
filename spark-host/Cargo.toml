@@ -1,0 +1,8 @@
+[package]
+name = "spark-host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+wasmtime = { version = "47", features = ["component-model"] }

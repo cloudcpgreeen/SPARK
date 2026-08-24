@@ -1,0 +1,9 @@
+// SPARK 契约 · spark:core（约定见 CONTRACT.md）。
+// 健康检查骨架：示范契约写法（接口 = 函数签名 + 输入输出语义）。
+
+package spark:core@0.1.0;
+
+interface health {
+  /// 返回 "SPARK <version>"。
+  ping: func() -> string;
+}

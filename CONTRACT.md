@@ -10,7 +10,8 @@
 
 WIT package 使用 `spark:<module>@<version>` 形式：
 
-- `spark:core@0.1.0` — 核心领域契约（当前骨架）。
+- `spark:core@0.1.0` — 核心领域契约（`wit/core.wit`，骨架）。
+- `spark:runtime@0.1.0` — 组件运行时契约（`wit/runtime.wit`）：`plugin` 接口 + `plugin-world` 世界。插件 = 导出此世界的组件。
 - 未来按领域拆模块：`spark:order@x.y.z`、`spark:identity@x.y.z` 等，一个模块一个 package。
 
 ## 3. 契约优先工作流（idea 落地第一步）
@@ -21,7 +22,7 @@ WIT package 使用 `spark:<module>@<version>` 形式：
 2. **实现**：按接口实现；接口没声明的能力不做。
 3. **验收**：用契约验收——测试按接口语义断言（输入 → 期望输出），契约变更必须先改 WIT 再改实现。
 
-> 当前阶段：idea 尚未确定。拿到 idea 后，第一步就是把它翻译成 `wit/spark.wit`（或新模块）里的接口。
+> 当前阶段：第一个真实接口已落地 —— `spark:runtime/plugin-world`（见 `wit/runtime.wit`），配套 `spark-plugin`（Upper 示例插件）与 `spark-host`（wasmtime 宿主）。
 
 ## 4. 版本规则
 
@@ -39,5 +40,7 @@ WIT package 遵循语义化版本（semver）：
 
 - 一个 WIT 接口 = 一个职责。
 - `spark-core` 是无 HTTP 纯库：领域逻辑放这里，不碰网络/IO。
-- 未来任何 HTTP/CLI/边界层 crate 只做适配与路由，不写领域逻辑。
+- **插件 = 导出 `plugin-world` 的零依赖 WASM 组件**：只依赖 `wit/runtime.wit`，不 import 任何宿主能力（含 WASI）。
+- **宿主（`spark-host`）= 沙箱加载器**：只做加载 / 调用 / 捕获，不写领域逻辑；插件 panic（trap）必须当作可恢复错误处理，宿主进程不崩、实例间互不污染。
+- 新增插件 = 新增一个满足契约的组件，宿主零改动。
 - 新增领域逻辑优先进 `spark-core`；只有某边界层独有的逻辑才留在该 crate。

@@ -1,1 +1,4 @@
-/target
+target/
+
+# cargo-component 构建时重新生成，不入库
+spark-plugin/src/bindings.rs

@@ -8,28 +8,31 @@ Cargo workspace，成员：
 
 ```
 spark/
-├── Cargo.toml        # workspace 定义
-├── spark-core/       # 无 HTTP 领域库（领域逻辑优先放这里）
-├── wit/              # WIT 契约（约定一，见 CONTRACT.md）
+├── Cargo.toml        # workspace 定义（spark-core、spark-host）
+├── spark-core/       # 无 HTTP 领域库：NAME / contract_version
+├── spark-host/       # wasmtime 宿主：沙箱加载 plugin-world 组件并调用
+├── spark-plugin/     # 插件组件（独立 workspace，仅 cargo component build）
+├── wit/              # WIT 契约：core.wit、runtime.wit（见 CONTRACT.md）
 └── CONTRACT.md       # 约定一 · 契约（WIT）
    DEVELOPMENT.md     # 约定二 · 开发（本文件）
    DEPLOYMENT.md      # 约定三 · 交付
 ```
 
 - 领域逻辑（模型 / 状态流转 / 纯函数）放 `spark-core`。
-- 未来的 HTTP/CLI/边界层 crate 只做路由与适配，不写领域逻辑。
+- 宿主（`spark-host`）与插件（`spark-plugin`）只通过 `wit/runtime.wit` 的 `plugin-world` 契约通信；插件 = 满足契约的零依赖 WASM 组件，宿主沙箱加载。
 - WIT 是接口唯一权威来源；接口与实现分离（见 CONTRACT.md）。
 
 ## 2. 构建与测试
 
 ```bash
-cargo build        # 根 workspace 构建
-cargo test         # 根 workspace 测试
-cargo test -p spark-core
+cargo build / cargo test                     # 根 workspace（spark-core + spark-host）
+cd spark-plugin && cargo component build --release  # 构建插件组件
+cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/spark_plugin.wasm <input>
 ```
 
-- WIT 构建工具（`cargo-component` / `wasm-tools`）在**第一个真实接口落地**时接入；当前骨架不引入。
-- 测试不依赖网络/外部服务（纯库友好，`spark-core` 无 HTTP）。
+- 插件组件固定 `--target wasm32-unknown-unknown`（`.cargo/config.toml` 已钉死），产物零 WASI import，纯粹导出 `spark:runtime/plugin`。
+- `spark-host` 集成测试（`tests/isolation.rs`）覆盖 happy path / trap 捕获 / trap 后隔离；组件未构建时自动跳过（先执行上面的 `cargo component build`）。
+- 测试不依赖网络/外部服务。
 
 ## 3. 代码风格（ponytail）
 
@@ -47,4 +50,4 @@ cargo test -p spark-core
 ## 5. 测试纪律
 
 - 契约验收测试按接口语义断言（输入 → 期望输出），不测实现细节。
-- `spark-core::contract_version()` 必须与 `wit/spark.wit` 的 package 版本对齐（当前 `0.1.0`）——契约与实现脱节是 bug。
+- `spark-core::contract_version()` 必须与 `wit/core.wit` 的 package 版本对齐（当前 `0.1.0`）；宿主/插件契约版本以 `wit/runtime.wit`（`spark:runtime@0.1.0`）为准——契约与实现脱节是 bug。
