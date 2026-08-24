@@ -1,0 +1,11 @@
+// SPARK 契约（约定见 CONTRACT.md）。
+// idea 落地第一步 = 把 idea 翻译成这里的 WIT 接口；实现必须满足接口，禁止绕过契约。
+// 当前 package 是骨架，仅示范契约写法；真实业务接口随 idea 落地填充。
+package spark:core@0.1.0;
+
+/// 契约健康检查：接入方用它确认契约可用。
+/// 非业务接口，仅示范：接口 = 函数签名 + 输入输出语义（doc 注释里写清）。
+interface health {
+  /// 返回 "SPARK <version>"。
+  ping: func() -> string;
+}
