@@ -84,7 +84,7 @@ SPARK 对不可信插件的立场：**默认不可信，一切攻击在沙箱内
 
 ### 已落地
 - `spark:runtime@0.2.0` 契约：`plugin-world`（零 import），`transform` 返回 `result<string, string>`（插件可声明式失败）、`info` 携带元数据（name/version/description）
-- 插件：`upper`（转大写）、`reverse`（倒序）、`attacker`（恶意示例，用于安全验证）
+- 插件：`upper`（转大写）、`reverse`（倒序）、`attacker`（恶意示例，用于安全验证）、`idcard`（真实业务算法：身份证校验，err 承载校验失败）
 - 宿主：`spark-host` CLI（`list` / `run <name>` / 直接路径）+ 集成测试（happy path / 声明式失败 / trap 捕获 / trap 后隔离 / 多插件可插拔）
 - 注册/发现：**插件自注册** —— 把 `.wasm` 组件放进 `plugins/` 即被 `Host::discover` 发现，`info().name` 就是注册名，宿主零配置文件
 - 并发模型：`Host` 长存（共享 Engine + 组件编译缓存 + 单 epoch bump 线程），每次调用新建独立 Store，可多线程并发，隔离不变
