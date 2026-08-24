@@ -147,6 +147,49 @@ impl Host {
         found
     }
 
+    /// 插件流水线：输入依次经过 `names` 各插件，前一步输出喂给下一步。
+    /// 任一步声明式失败（`code` 可编程区分）或 trap 即 fail-fast。
+    pub fn pipe(&self, dir: &str, input: &str, names: &[&str]) -> Result<String, PipeFailure> {
+        let found = self.discover(dir);
+        let mut current = input.to_string();
+        for name in names {
+            let Some((file, _)) = found.iter().find(|(_, info)| info.name == *name) else {
+                return Err(PipeFailure::Declined {
+                    step: (*name).to_string(),
+                    error: PluginError {
+                        code: "not-found".into(),
+                        message: format!("未找到插件 `{name}`"),
+                    },
+                });
+            };
+            let path = format!("{dir}/{file}");
+            match self.run(&path, &current) {
+                Ok((_, Ok(out))) => current = out,
+                Ok((_, Err(error))) => {
+                    return Err(PipeFailure::Declined {
+                        step: (*name).to_string(),
+                        error,
+                    });
+                }
+                Err(e) => {
+                    return Err(PipeFailure::Trap {
+                        step: (*name).to_string(),
+                        detail: format!("{e:#}"),
+                    });
+                }
+            }
+        }
+        Ok(current)
+    }
+}
+
+/// 流水线失败：哪一步、怎么失败。
+#[derive(Debug)]
+pub enum PipeFailure {
+    /// 插件声明式失败：`code` 供分支，`message` 供人读。
+    Declined { step: String, error: PluginError },
+    /// 沙箱/trap：插件崩溃被捕获，宿主存活。
+    Trap { step: String, detail: String },
 }
 
 impl Drop for Host {

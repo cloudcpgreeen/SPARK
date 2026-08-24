@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use spark_host::Host;
+use spark_host::{Host, PipeFailure};
 
 const PLUGINS_DIR: &str = "plugins";
 
@@ -16,9 +16,10 @@ fn main() -> ExitCode {
     match args.as_slice() {
         [cmd] if cmd == "list" => list(&host),
         [cmd, name, input] if cmd == "run" => run_named(&host, name, input),
+        [cmd, input, names @ ..] if cmd == "pipe" => pipe(&host, input, names),
         [wasm, input] => run_path(&host, wasm, input),
         _ => {
-            eprintln!("usage: spark-host <plugin.wasm> <input> | run <name> <input> | list");
+            eprintln!("usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list");
             ExitCode::from(2)
         }
     }
@@ -52,6 +53,26 @@ fn run_named(host: &Host, name: &str, input: &str) -> ExitCode {
         return ExitCode::from(1);
     };
     run_path(host, &format!("{PLUGINS_DIR}/{file}"), input)
+}
+
+/// 插件流水线：输入依次过各插件，前一步输出喂下一步，任一步失败即停。
+fn pipe(host: &Host, input: &str, names: &[String]) -> ExitCode {
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    match host.pipe(PLUGINS_DIR, input, &names) {
+        Ok(out) => {
+            println!("output: {out}");
+            println!("通过 {} 个插件", names.len());
+            ExitCode::SUCCESS
+        }
+        Err(PipeFailure::Declined { step, error }) => {
+            eprintln!("✗ 未通过 {step} [{code}]: {message}", code = error.code, message = error.message);
+            ExitCode::from(1)
+        }
+        Err(PipeFailure::Trap { step, detail }) => {
+            eprintln!("✗ {step} 崩溃被沙箱捕获: {detail}");
+            ExitCode::from(1)
+        }
+    }
 }
 
 /// 直接给组件路径运行。
