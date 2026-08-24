@@ -1,7 +1,7 @@
 //! 端到端：真实插件组件加载 + 沙箱隔离 + 多插件可插拔。
 //! 组件缺失时跳过（先 `cd spark-plugin && cargo component build --release`，reverse/attacker 同）。
 
-use spark_host::run_plugin;
+use spark_host::Host;
 
 /// 插件目录名 → 组件路径（产物名 = 目录名连字符转下划线 + `.wasm`）。
 fn component_path(plugin_dir: &str) -> Option<String> {
@@ -19,7 +19,8 @@ fn happy_path() {
         eprintln!("{SKIP}");
         return;
     };
-    let (info, out) = run_plugin(&wasm, "hello").unwrap();
+    let host = Host::new().unwrap();
+    let (info, out) = host.run(&wasm, "hello").unwrap();
     assert_eq!(info.name, "upper");
     assert_eq!(info.version, "0.2.0");
     assert_eq!(out, Ok("HELLO".into()));
@@ -32,15 +33,13 @@ fn declared_error_not_trap() {
         eprintln!("{SKIP}");
         return;
     };
-    let (info, out) = run_plugin(&wasm, "err-x").unwrap();
+    let host = Host::new().unwrap();
+    let (info, out) = host.run(&wasm, "err-x").unwrap();
     assert_eq!(info.name, "upper");
     let Err(msg) = out else {
         panic!("err 开头应返回声明式 err，而非 ok: {out:?}");
     };
-    assert!(
-        !msg.contains("wasm backtrace"),
-        "声明式错误不是 trap: {msg}"
-    );
+    assert!(!msg.contains("wasm backtrace"), "声明式错误不是 trap: {msg}");
 }
 
 #[test]
@@ -49,7 +48,8 @@ fn trap_is_contained() {
         eprintln!("{SKIP}");
         return;
     };
-    let e = run_plugin(&wasm, "trap-me").unwrap_err();
+    let host = Host::new().unwrap();
+    let e = host.run(&wasm, "trap-me").unwrap_err();
     assert!(
         e.to_string().contains("wasm backtrace"),
         "插件 trap 应以 wasm 层错误返回，而不是宿主崩溃: {e}"
@@ -62,20 +62,22 @@ fn isolated_after_trap() {
         eprintln!("{SKIP}");
         return;
     };
-    assert!(run_plugin(&wasm, "trap-x").is_err());
-    let (info, out) = run_plugin(&wasm, "ok").unwrap();
+    let host = Host::new().unwrap();
+    assert!(host.run(&wasm, "trap-x").is_err());
+    let (info, out) = host.run(&wasm, "ok").unwrap();
     assert_eq!(info.name, "upper");
     assert_eq!(out, Ok("OK".into()));
 }
 
 #[test]
 fn second_plugin_same_host() {
-    // 同一个宿主代码加载第二个插件：宿主零改动即插即用。
+    // 同一个宿主加载第二个插件：宿主零改动即插即用。
     let Some(wasm) = component_path("spark-plugin-reverse") else {
         eprintln!("skip: reverse 组件未构建，先 `cd spark-plugin-reverse && cargo component build --release`");
         return;
     };
-    let (info, out) = run_plugin(&wasm, "hello").unwrap();
+    let host = Host::new().unwrap();
+    let (info, out) = host.run(&wasm, "hello").unwrap();
     assert_eq!(info.name, "reverse");
     assert_eq!(out, Ok("olleh".into()));
 }
@@ -87,10 +89,11 @@ fn attacker_cpu_bomb_cut_off() {
         eprintln!("skip: attacker 未构建，先 `cd spark-plugin-attacker && cargo component build --release`");
         return;
     };
-    let (info, out) = run_plugin(&wasm, "hello").unwrap();
+    let host = Host::new().unwrap();
+    let (info, out) = host.run(&wasm, "hello").unwrap();
     assert_eq!(info.name, "attacker");
     assert_eq!(out, Ok("hello".into()));
-    let e = run_plugin(&wasm, "loop").unwrap_err();
+    let e = host.run(&wasm, "loop").unwrap_err();
     assert!(
         e.to_string().contains("wasm backtrace"),
         "死循环应以 wasm trap 切断而非挂死: {e}"
@@ -104,7 +107,8 @@ fn attacker_memory_bomb_cut_off() {
         eprintln!("skip: attacker 未构建");
         return;
     };
-    let e = run_plugin(&wasm, "alloc").unwrap_err();
+    let host = Host::new().unwrap();
+    let e = host.run(&wasm, "alloc").unwrap_err();
     assert!(
         e.to_string().contains("wasm backtrace"),
         "内存炸弹应以 wasm trap 切断: {e}"

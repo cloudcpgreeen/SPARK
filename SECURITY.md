@@ -17,7 +17,7 @@
 
 ## 防线细节（spark-host）
 
-- 每次调用 `run_plugin` 新建独立 Engine/Store + epoch bump 线程，实例互不污染。
+- `Host` 长存：共享 Engine + 组件编译缓存 + 一个 epoch bump 线程；每次调用新建独立 Store 与 deadline，实例互不污染。
 - **CPU**：`Config::epoch_interruption(true)` + 后台线程周期性 `Engine::increment_epoch()`，
   `Store::set_epoch_deadline(1)`。任何执行超过一个 tick（`EPOCH_TICK_MS`，默认 10ms）的
   wasm 立即被切断。
@@ -34,7 +34,7 @@
 
 - epoch 是**时间**预算：恶意插件可每次都在 deadline 内完成少量工作，但那点工作量不构成
   有意义攻击；且单次调用后宿主即返回，不会长期占线。
-- 单线程同步宿主：长时间运行的插件会阻塞调用线程——但会被 epoch 切断，阻塞有界。
+- 同步调用：单个调用会阻塞调用线程，但会被 epoch 切断，阻塞有界；`Host` 共享且线程安全，多线程并发调用互不干扰。
 
 ## 报告漏洞
 

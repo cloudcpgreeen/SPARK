@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use spark_host::{discover_plugins, run_plugin};
+use spark_host::Host;
 
 /// 已构建的组件路径（产物名 = 目录名连字符转下划线 + `.wasm`）。
 fn built_wasm(plugin_dir: &str) -> Option<PathBuf> {
@@ -37,7 +37,8 @@ fn dropped_wasm_is_registered() {
         return;
     }
     let dir = setup_plugins("discover");
-    let found = discover_plugins(&dir);
+    let host = Host::new().unwrap();
+    let found = host.discover(&dir);
     let mut names: Vec<_> = found.iter().map(|(_, info)| info.name.clone()).collect();
     names.sort();
     assert_eq!(names, ["attacker", "reverse", "upper"]);
@@ -50,12 +51,13 @@ fn discovered_plugin_run_by_name() {
         return;
     }
     let dir = setup_plugins("run");
-    let found = discover_plugins(&dir);
+    let host = Host::new().unwrap();
+    let found = host.discover(&dir);
     let (file, info) = found
         .into_iter()
         .find(|(_, info)| info.name == "reverse")
         .unwrap();
-    let (rinfo, out) = run_plugin(&format!("{dir}/{file}"), "hello").unwrap();
+    let (rinfo, out) = host.run(&format!("{dir}/{file}"), "hello").unwrap();
     assert_eq!(rinfo.name, info.name);
     assert_eq!(out, Ok("olleh".into()));
 }

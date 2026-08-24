@@ -1,15 +1,22 @@
 use std::process::ExitCode;
 
-use spark_host::{discover_plugins, run_plugin};
+use spark_host::Host;
 
 const PLUGINS_DIR: &str = "plugins";
 
 fn main() -> ExitCode {
+    let host = match Host::new() {
+        Ok(host) => host,
+        Err(e) => {
+            eprintln!("初始化宿主失败: {e:#}");
+            return ExitCode::from(1);
+        }
+    };
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
-        [cmd] if cmd == "list" => list(),
-        [cmd, name, input] if cmd == "run" => run_named(name, input),
-        [wasm, input] => run_path(wasm, input),
+        [cmd] if cmd == "list" => list(&host),
+        [cmd, name, input] if cmd == "run" => run_named(&host, name, input),
+        [wasm, input] => run_path(&host, wasm, input),
         _ => {
             eprintln!("usage: spark-host <plugin.wasm> <input> | run <name> <input> | list");
             ExitCode::from(2)
@@ -18,8 +25,8 @@ fn main() -> ExitCode {
 }
 
 /// 发现并列出 `plugins/` 下的插件（name = 组件自注册名）。
-fn list() -> ExitCode {
-    let found = discover_plugins(PLUGINS_DIR);
+fn list(host: &Host) -> ExitCode {
+    let found = host.discover(PLUGINS_DIR);
     if found.is_empty() {
         eprintln!("未发现插件：把 .wasm 组件放进 {PLUGINS_DIR}/ 即注册");
         return ExitCode::SUCCESS;
@@ -34,8 +41,8 @@ fn list() -> ExitCode {
 }
 
 /// 按 `info().name` 解析并运行插件。
-fn run_named(name: &str, input: &str) -> ExitCode {
-    let found = discover_plugins(PLUGINS_DIR);
+fn run_named(host: &Host, name: &str, input: &str) -> ExitCode {
+    let found = host.discover(PLUGINS_DIR);
     let Some((file, _)) = found.iter().find(|(_, info)| info.name == name) else {
         let names: Vec<_> = found.iter().map(|(_, info)| info.name.as_str()).collect();
         eprintln!(
@@ -44,12 +51,12 @@ fn run_named(name: &str, input: &str) -> ExitCode {
         );
         return ExitCode::from(1);
     };
-    run_path(&format!("{PLUGINS_DIR}/{file}"), input)
+    run_path(host, &format!("{PLUGINS_DIR}/{file}"), input)
 }
 
 /// 直接给组件路径运行。
-fn run_path(wasm: &str, input: &str) -> ExitCode {
-    match run_plugin(wasm, input) {
+fn run_path(host: &Host, wasm: &str, input: &str) -> ExitCode {
+    match host.run(wasm, input) {
         Ok((info, Ok(out))) => {
             println!("plugin: {} {} — {}", info.name, info.version, info.description);
             println!("output: {out}");
