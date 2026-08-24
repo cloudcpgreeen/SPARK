@@ -3,13 +3,14 @@
 > 组件运行时：领域逻辑写成满足 `spark:runtime` 契约的 WASM 组件，宿主沙箱加载调用。契约即 WIT。
 > 开源协议：[GPL-3.0](LICENSE)。
 
-## 三份约定
+## 文档
 
 | 文档 | 内容 |
 | --- | --- |
+| [`MANIFESTO.md`](MANIFESTO.md) | 圣经 · 理念宣言：项目为什么存在、是什么、边界在哪、怎么保护自己 |
 | [`CONTRACT.md`](CONTRACT.md) | 约定一 · 契约：接口即契约，契约即 **WIT**；契约优先工作流与版本规则 |
 | [`DEVELOPMENT.md`](DEVELOPMENT.md) | 约定二 · 开发：项目结构、构建测试、代码风格、新增功能流程 |
-| [`DEPLOYMENT.md`](DEPLOYMENT.md) | 约定三 · 交付：交付门禁、版本发布、运行/配置/安全（预留） |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md) | 约定三 · 交付：交付门禁、版本发布、运行/配置/安全 |
 
 ## 结构
 
