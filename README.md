@@ -13,6 +13,7 @@
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | 约定三 · 交付：交付门禁、版本发布、运行/配置/安全 |
 | [`SECURITY.md`](SECURITY.md) | 安全：威胁模型、上报流程 |
 | [`EXAMPLES.md`](EXAMPLES.md) | 使用范例：手把手从零写插件、构建、跑起来 |
+| [`RELATIONSHIPS.md`](RELATIONSHIPS.md) | 人物关系图：圣经里的所有人物与关系，一张网收束 |
 
 ## 结构
 
