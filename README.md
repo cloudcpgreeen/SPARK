@@ -15,6 +15,7 @@
 | [`EXAMPLES.md`](EXAMPLES.md) | 使用范例：手把手从零写插件、构建、跑起来 |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 完整的版本：框架怎么形成的 + 具体实现逻辑 |
 | [`RELATIONSHIPS.md`](RELATIONSHIPS.md) | 人物关系图：圣经里的所有人物与关系，一张网收束 |
+| [`REFERENCE.md`](REFERENCE.md) | 技术参考：WIT 契约原文 / 宿主 API / 沙箱参数 / 错误码全集 / CLI——全部用技术术语钉死 |
 | [`ESSAY.md`](ESSAY.md) | 理念外一篇：论论文安全——不是防学生，是护写作者 |
 
 ## 结构

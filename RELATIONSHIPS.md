@@ -46,6 +46,7 @@
 | **DEPLOYMENT** | 守门人 | 交付门禁、版本发布 | 服务要上线的人 |
 | **SECURITY** | 卫士 | 威胁模型、防线细节 | 保护宿主 |
 | **ARCHITECTURE** | 工程师 / 总账 | 完整的版本：框架怎么形成的 + 实现逻辑 | 把其余所有文档拧成一套 |
+| **REFERENCE** | 法学家 / 字典 | 技术术语包裹：契约原文 / API / 沙箱参数 / 错误码 / CLI 钉死成表 | 面向严谨读者与机器 |
 | **EXAMPLES** | 导游 | 手把手带你从零跑一遍 | 服务新手 |
 | **README** | 门面 | 一个入口，指向所有人 | 链接一切 |
 
@@ -79,6 +80,7 @@
 
 - **README 是门面**：唯一入口，链接 MANIFESTO / CONTRACT / ARCHITECTURE / DEVELOPMENT / DEPLOYMENT / SECURITY / EXAMPLES / RELATIONSHIPS。
 - **ARCHITECTURE 是总账**：完整的版本——框架怎么形成的 + 具体实现逻辑，把其余文档拧成一套。
+- **REFERENCE 是字典**：所有说明补一层技术术语——WIT 契约原文、宿主公开 API、沙箱机制与参数、错误码全集、CLI 参考，面向严谨读者与机器。
 - **EXAMPLES 是实操**：从零写插件、构建、跑起来，新手照做就行。
 - **一切以 MANIFESTO 为根**：与圣经冲突的改动，先改圣经——因为它回答「为什么」。
 
