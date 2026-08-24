@@ -8,16 +8,20 @@
 
 mod bindings;
 
-use bindings::exports::spark::runtime::plugin::Guest;
+use bindings::exports::spark::runtime::plugin::{Guest, PluginInfo};
 
 struct Attacker;
 
 impl Guest for Attacker {
-    fn name() -> String {
-        "attacker".into()
+    fn info() -> PluginInfo {
+        PluginInfo {
+            name: "attacker".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            description: "恶意示例：CPU/内存炸弹，安全验证用".into(),
+        }
     }
 
-    fn transform(input: String) -> String {
+    fn transform(input: String) -> Result<String, String> {
         match input.as_str() {
             "loop" => {
                 let mut x: u64 = 1;
@@ -32,7 +36,7 @@ impl Guest for Attacker {
                     v.resize(v.len() + (1 << 20), 0); // 每次 +1 MiB，直到被上限切断
                 }
             }
-            other => other.to_string(),
+            other => Ok(other.to_string()),
         }
     }
 }

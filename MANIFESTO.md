@@ -83,14 +83,14 @@ SPARK 对不可信插件的立场：**默认不可信，一切攻击在沙箱内
 ## 7. 现状与路标
 
 ### 已落地
-- `spark:runtime@0.1.0` 契约：`plugin-world`（零 import）
+- `spark:runtime@0.2.0` 契约：`plugin-world`（零 import），`transform` 返回 `result<string, string>`（插件可声明式失败）、`info` 携带元数据（name/version/description）
 - 插件：`upper`（转大写）、`reverse`（倒序）、`attacker`（恶意示例，用于安全验证）
-- 宿主：`spark-host` CLI + 集成测试（happy path / trap 捕获 / trap 后隔离 / 多插件可插拔）
+- 宿主：`spark-host` CLI + 集成测试（happy path / 声明式失败 / trap 捕获 / trap 后隔离 / 多插件可插拔）
 - 安全加固：epoch CPU 上限 + StoreLimits 内存上限，`attacker` 的 CPU/内存炸弹被切断
 
 ### 路标
-- 契约富类型：`result<output, error>` 错误语义、插件元数据（`spark:runtime@0.2.0`）
-- 插件注册 / 发现、并发调用模型
+- 插件注册 / 发现（元数据就位，等消费方）
+- 并发调用模型
 
 ## 8. 文档索引
 

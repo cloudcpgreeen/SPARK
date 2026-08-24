@@ -1,6 +1,9 @@
 //! SPARK 宿主：沙箱加载满足 `plugin-world` 契约的 WASM 组件并调用插件接口。
 //!
-//! 契约见 `wit/runtime.wit`。插件导出 `spark:runtime/plugin`，不依赖宿主任何能力。
+//! 契约见 `wit/runtime.wit`（`spark:runtime@0.2.0`）。插件导出 `spark:runtime/plugin`，
+//! 不依赖宿主任何能力。宿主 bindgen 钉死契约版本：加载不匹配组件时 instantiate 直接失败。
+//! 插件 `transform` 返回 `result<string, string>`：声明式 `err`（值）与 panic（trap）
+//! 都是可恢复错误，宿主不崩。
 //! 沙箱强制**资源有界**：
 //! - CPU 走 epoch 时间预算 —— 后台线程周期性 bump epoch，任何越界执行（含空 `loop {}`，
 //!   fuel 计量的已知漏洞）超时即 trap；
@@ -13,6 +16,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use crate::exports::spark::runtime::plugin::PluginInfo;
 use anyhow::Result;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
@@ -33,9 +37,13 @@ pub const EPOCH_TICK_MS: u64 = 10;
 /// 插件线性内存上限：内存炸弹在越限时被切断。
 pub const MEMORY_LIMIT: usize = 16 * 1024 * 1024; // 16 MiB
 
-/// 加载组件，调用一次 `name()` 与 `transform(input)`。
-/// 沙箱强制资源有界：CPU 走 epoch 时间预算、内存走 StoreLimits。
-pub fn run_plugin(wasm_path: &str, input: &str) -> Result<(String, String)> {
+/// 加载组件，调用一次 `info()` 与 `transform(input)`。
+/// 返回 `(插件信息, 变换结果)`；`transform` 的 `Err` 是插件声明式失败（值，非崩溃），
+/// 外层 `Err` 才是宿主/沙箱错误（trap、加载失败、资源越限）。
+pub fn run_plugin(
+    wasm_path: &str,
+    input: &str,
+) -> Result<(PluginInfo, std::result::Result<String, String>)> {
     let mut config = Config::new();
     config.epoch_interruption(true);
     let engine = Engine::new(&config)?;
@@ -58,7 +66,11 @@ pub fn run_plugin(wasm_path: &str, input: &str) -> Result<(String, String)> {
     result
 }
 
-fn run_plugin_inner(engine: &Engine, wasm_path: &str, input: &str) -> Result<(String, String)> {
+fn run_plugin_inner(
+    engine: &Engine,
+    wasm_path: &str,
+    input: &str,
+) -> Result<(PluginInfo, std::result::Result<String, String>)> {
     let component = Component::from_file(engine, wasm_path)?;
     let linker = Linker::new(engine);
     let host = HostData {
@@ -72,7 +84,7 @@ fn run_plugin_inner(engine: &Engine, wasm_path: &str, input: &str) -> Result<(St
     store.set_epoch_deadline(1); // 当前 epoch +1：bumper 下一次 bump 即触发
     let instance = PluginWorld::instantiate(&mut store, &component, &linker)?;
     let plugin = instance.spark_runtime_plugin();
-    let name = plugin.call_name(&mut store)?;
+    let info = plugin.call_info(&mut store)?;
     let out = plugin.call_transform(&mut store, input)?;
-    Ok((name, out))
+    Ok((info, out))
 }

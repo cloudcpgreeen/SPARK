@@ -7,9 +7,15 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     match spark_host::run_plugin(&wasm, &input) {
-        Ok((name, out)) => {
-            println!("plugin: {name}");
+        Ok((info, Ok(out))) => {
+            println!("plugin: {} {} — {}", info.name, info.version, info.description);
             println!("output: {out}");
+            ExitCode::SUCCESS
+        }
+        Ok((info, Err(msg))) => {
+            // 插件声明式失败：结果是 err，不是崩溃。
+            println!("plugin: {} {} — {}", info.name, info.version, info.description);
+            eprintln!("plugin error: {msg}");
             ExitCode::SUCCESS
         }
         Err(e) => {

@@ -3,17 +3,21 @@
 
 mod bindings;
 
-use bindings::exports::spark::runtime::plugin::Guest;
+use bindings::exports::spark::runtime::plugin::{Guest, PluginInfo};
 
 struct Reverse;
 
 impl Guest for Reverse {
-    fn name() -> String {
-        "reverse".into()
+    fn info() -> PluginInfo {
+        PluginInfo {
+            name: "reverse".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            description: "输入倒序".into(),
+        }
     }
 
-    fn transform(input: String) -> String {
-        input.chars().rev().collect()
+    fn transform(input: String) -> Result<String, String> {
+        Ok(input.chars().rev().collect())
     }
 }
 

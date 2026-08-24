@@ -1,5 +1,5 @@
 //! 端到端：真实插件组件加载 + 沙箱隔离 + 多插件可插拔。
-//! 组件缺失时跳过（先 `cd spark-plugin && cargo component build --release`，reverse 同）。
+//! 组件缺失时跳过（先 `cd spark-plugin && cargo component build --release`，reverse/attacker 同）。
 
 use spark_host::run_plugin;
 
@@ -19,9 +19,28 @@ fn happy_path() {
         eprintln!("{SKIP}");
         return;
     };
-    let (name, out) = run_plugin(&wasm, "hello").unwrap();
-    assert_eq!(name, "upper");
-    assert_eq!(out, "HELLO");
+    let (info, out) = run_plugin(&wasm, "hello").unwrap();
+    assert_eq!(info.name, "upper");
+    assert_eq!(info.version, "0.2.0");
+    assert_eq!(out, Ok("HELLO".into()));
+}
+
+#[test]
+fn declared_error_not_trap() {
+    // 插件声明式失败（result 的 err）是值，不是 trap，更不是宿主崩溃。
+    let Some(wasm) = component_path("spark-plugin") else {
+        eprintln!("{SKIP}");
+        return;
+    };
+    let (info, out) = run_plugin(&wasm, "err-x").unwrap();
+    assert_eq!(info.name, "upper");
+    let Err(msg) = out else {
+        panic!("err 开头应返回声明式 err，而非 ok: {out:?}");
+    };
+    assert!(
+        !msg.contains("wasm backtrace"),
+        "声明式错误不是 trap: {msg}"
+    );
 }
 
 #[test]
@@ -44,9 +63,9 @@ fn isolated_after_trap() {
         return;
     };
     assert!(run_plugin(&wasm, "trap-x").is_err());
-    let (name, out) = run_plugin(&wasm, "ok").unwrap();
-    assert_eq!(name, "upper");
-    assert_eq!(out, "OK");
+    let (info, out) = run_plugin(&wasm, "ok").unwrap();
+    assert_eq!(info.name, "upper");
+    assert_eq!(out, Ok("OK".into()));
 }
 
 #[test]
@@ -56,9 +75,9 @@ fn second_plugin_same_host() {
         eprintln!("skip: reverse 组件未构建，先 `cd spark-plugin-reverse && cargo component build --release`");
         return;
     };
-    let (name, out) = run_plugin(&wasm, "hello").unwrap();
-    assert_eq!(name, "reverse");
-    assert_eq!(out, "olleh");
+    let (info, out) = run_plugin(&wasm, "hello").unwrap();
+    assert_eq!(info.name, "reverse");
+    assert_eq!(out, Ok("olleh".into()));
 }
 
 #[test]
@@ -68,8 +87,9 @@ fn attacker_cpu_bomb_cut_off() {
         eprintln!("skip: attacker 未构建，先 `cd spark-plugin-attacker && cargo component build --release`");
         return;
     };
-    let (name, out) = run_plugin(&wasm, "hello").unwrap();
-    assert_eq!((name.as_str(), out.as_str()), ("attacker", "hello"));
+    let (info, out) = run_plugin(&wasm, "hello").unwrap();
+    assert_eq!(info.name, "attacker");
+    assert_eq!(out, Ok("hello".into()));
     let e = run_plugin(&wasm, "loop").unwrap_err();
     assert!(
         e.to_string().contains("wasm backtrace"),
