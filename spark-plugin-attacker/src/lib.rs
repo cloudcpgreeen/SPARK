@@ -1,0 +1,40 @@
+//! SPARK 恶意插件示例：活教材，用来证明沙箱「攻击者不攻自破」。
+//!
+//! - `transform("loop")`  → CPU 炸弹：无限运算，靠 epoch 时间预算切断（空 `loop {}` 也跑不掉）；
+//! - `transform("alloc")` → 内存炸弹：无限分配，靠 StoreLimits 切断；
+//! - 其他输入原样返回。
+//!
+//! 只在被显式加载时才会作恶，宿主永远把它挡在沙箱里（见 SECURITY.md）。
+
+mod bindings;
+
+use bindings::exports::spark::runtime::plugin::Guest;
+
+struct Attacker;
+
+impl Guest for Attacker {
+    fn name() -> String {
+        "attacker".into()
+    }
+
+    fn transform(input: String) -> String {
+        match input.as_str() {
+            "loop" => {
+                let mut x: u64 = 1;
+                loop {
+                    x = x.wrapping_mul(3).wrapping_add(1);
+                    std::hint::black_box(x);
+                }
+            }
+            "alloc" => {
+                let mut v: Vec<u8> = Vec::new();
+                loop {
+                    v.resize(v.len() + (1 << 20), 0); // 每次 +1 MiB，直到被上限切断
+                }
+            }
+            other => other.to_string(),
+        }
+    }
+}
+
+bindings::export!(Attacker with_types_in bindings);

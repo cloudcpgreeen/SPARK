@@ -11,6 +11,7 @@
 | [`CONTRACT.md`](CONTRACT.md) | 约定一 · 契约：接口即契约，契约即 **WIT**；契约优先工作流与版本规则 |
 | [`DEVELOPMENT.md`](DEVELOPMENT.md) | 约定二 · 开发：项目结构、构建测试、代码风格、新增功能流程 |
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | 约定三 · 交付：交付门禁、版本发布、运行/配置/安全 |
+| [`SECURITY.md`](SECURITY.md) | 安全：威胁模型、上报流程 |
 
 ## 结构
 
@@ -31,4 +32,4 @@ cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/sp
 
 写一个满足 `plugin-world` 契约的组件（见 `wit/runtime.wit`），宿主零改动即可加载。
 
-现有示例插件：`spark-plugin`（upper，输入转大写）、`spark-plugin-reverse`（reverse，输入倒序）。两个插件用同一个 `spark-host` 二进制加载（见 `spark-host/tests/isolation.rs` 的 `second_plugin_same_host`）。
+现有示例插件：`spark-plugin`（upper，输入转大写）、`spark-plugin-reverse`（reverse，输入倒序）、`spark-plugin-attacker`（恶意示例，安全验证用：CPU/内存炸弹会被沙箱切断）。三个插件用同一个 `spark-host` 二进制加载。

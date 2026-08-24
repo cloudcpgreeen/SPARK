@@ -60,3 +60,33 @@ fn second_plugin_same_host() {
     assert_eq!(name, "reverse");
     assert_eq!(out, "olleh");
 }
+
+#[test]
+fn attacker_cpu_bomb_cut_off() {
+    // 恶意插件：正常输入不受影响；CPU 炸弹（死循环）被 epoch 时间预算切断，不挂死宿主。
+    let Some(wasm) = component_path("spark-plugin-attacker") else {
+        eprintln!("skip: attacker 未构建，先 `cd spark-plugin-attacker && cargo component build --release`");
+        return;
+    };
+    let (name, out) = run_plugin(&wasm, "hello").unwrap();
+    assert_eq!((name.as_str(), out.as_str()), ("attacker", "hello"));
+    let e = run_plugin(&wasm, "loop").unwrap_err();
+    assert!(
+        e.to_string().contains("wasm backtrace"),
+        "死循环应以 wasm trap 切断而非挂死: {e}"
+    );
+}
+
+#[test]
+fn attacker_memory_bomb_cut_off() {
+    // 恶意插件：内存炸弹（无限分配）被 StoreLimits 切断，宿主内存不被耗尽。
+    let Some(wasm) = component_path("spark-plugin-attacker") else {
+        eprintln!("skip: attacker 未构建");
+        return;
+    };
+    let e = run_plugin(&wasm, "alloc").unwrap_err();
+    assert!(
+        e.to_string().contains("wasm backtrace"),
+        "内存炸弹应以 wasm trap 切断: {e}"
+    );
+}

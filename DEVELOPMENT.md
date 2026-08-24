@@ -26,12 +26,15 @@ spark/
 
 ```bash
 cargo build / cargo test                     # 根 workspace（spark-core + spark-host）
-cd spark-plugin && cargo component build --release  # 构建插件组件
+cd spark-plugin && cargo component build --release         # 构建插件组件（upper）
+cd spark-plugin-reverse && cargo component build --release # reverse
+cd spark-plugin-attacker && cargo component build --release # attacker（恶意示例，安全验证）
 cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/spark_plugin.wasm <input>
 ```
 
 - 插件组件固定 `--target wasm32-unknown-unknown`（`.cargo/config.toml` 已钉死），产物零 WASI import，纯粹导出 `spark:runtime/plugin`。
-- `spark-host` 集成测试（`tests/isolation.rs`）覆盖 happy path / trap 捕获 / trap 后隔离；组件未构建时自动跳过（先执行上面的 `cargo component build`）。
+- `spark-host` 集成测试（`tests/isolation.rs`）覆盖 happy path / trap 捕获 / trap 后隔离 / 多插件可插拔 / 攻击者切断；组件未构建时自动跳过（先执行上面的 `cargo component build`）。
+- 沙箱资源有界：CPU 走 epoch 时间预算、内存走 StoreLimits（见 [SECURITY.md](SECURITY.md)）。
 - 测试不依赖网络/外部服务。
 
 ## 3. 代码风格（ponytail）

@@ -1,25 +1,75 @@
 //! SPARK 宿主：沙箱加载满足 `plugin-world` 契约的 WASM 组件并调用插件接口。
 //!
-//! 契约见 `wit/runtime.wit`。插件导出 `spark:runtime/plugin`，不依赖宿主任何能力；
-//! 宿主每次调用新建独立 Engine —— 插件 trap 被捕获为 `Err`，不污染宿主。
+//! 契约见 `wit/runtime.wit`。插件导出 `spark:runtime/plugin`，不依赖宿主任何能力。
+//! 沙箱强制**资源有界**：
+//! - CPU 走 epoch 时间预算 —— 后台线程周期性 bump epoch，任何越界执行（含空 `loop {}`，
+//!   fuel 计量的已知漏洞）超时即 trap；
+//! - 内存走 StoreLimits —— 内存炸弹在越限时被切断。
+//! 攻击在预算耗尽时 → `Err`，宿主永远可响应；每次调用新建独立 Engine/Store/后台线程，
+//! 插件互不污染。
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use anyhow::Result;
 use wasmtime::component::{Component, Linker};
-use wasmtime::{Engine, Store};
+use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
+
+/// Store 宿主数据：存放资源限制器（`Store::limiter` 的闭包要求返回借自 store 数据的引用）。
+struct HostData {
+    limits: StoreLimits,
+}
 
 wasmtime::component::bindgen!({
     path: "../wit/runtime.wit",
     world: "plugin-world",
 });
 
+/// 后台线程 bump epoch 的间隔：插件执行超过约一个 tick 即视为失控，被切断。
+pub const EPOCH_TICK_MS: u64 = 10;
+
+/// 插件线性内存上限：内存炸弹在越限时被切断。
+pub const MEMORY_LIMIT: usize = 16 * 1024 * 1024; // 16 MiB
+
 /// 加载组件，调用一次 `name()` 与 `transform(input)`。
-/// 插件 panic → trap → `Err`（沙箱隔离，宿主存活）。
+/// 沙箱强制资源有界：CPU 走 epoch 时间预算、内存走 StoreLimits。
 pub fn run_plugin(wasm_path: &str, input: &str) -> Result<(String, String)> {
-    let engine = Engine::default();
-    let component = Component::from_file(&engine, wasm_path)?;
-    let linker = Linker::new(&engine);
-    // plugin-world 无 import：无需注册宿主函数。
-    let mut store = Store::new(&engine, ());
+    let mut config = Config::new();
+    config.epoch_interruption(true);
+    let engine = Engine::new(&config)?;
+
+    // 后台线程周期性 bump epoch：越过 deadline 的 wasm 立即 trap（含空死循环）。
+    let stop = Arc::new(AtomicBool::new(false));
+    let bumper_engine = engine.clone();
+    let bumper_stop = stop.clone();
+    let bumper = thread::spawn(move || {
+        while !bumper_stop.load(Ordering::Relaxed) {
+            bumper_engine.increment_epoch();
+            thread::sleep(Duration::from_millis(EPOCH_TICK_MS));
+        }
+    });
+
+    let result = run_plugin_inner(&engine, wasm_path, input);
+
+    stop.store(true, Ordering::Relaxed);
+    bumper.join().ok();
+    result
+}
+
+fn run_plugin_inner(engine: &Engine, wasm_path: &str, input: &str) -> Result<(String, String)> {
+    let component = Component::from_file(engine, wasm_path)?;
+    let linker = Linker::new(engine);
+    let host = HostData {
+        limits: StoreLimitsBuilder::new()
+            .memory_size(MEMORY_LIMIT)
+            .trap_on_grow_failure(true)
+            .build(),
+    };
+    let mut store = Store::new(engine, host);
+    store.limiter(|data| &mut data.limits);
+    store.set_epoch_deadline(1); // 当前 epoch +1：bumper 下一次 bump 即触发
     let instance = PluginWorld::instantiate(&mut store, &component, &linker)?;
     let plugin = instance.spark_runtime_plugin();
     let name = plugin.call_name(&mut store)?;
