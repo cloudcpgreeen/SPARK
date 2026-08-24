@@ -13,11 +13,12 @@ fn built_wasm(plugin_dir: &str) -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
-const PLUGINS: [&str; 4] = [
+const PLUGINS: [&str; 5] = [
     "spark-plugin",
     "spark-plugin-reverse",
     "spark-plugin-attacker",
     "spark-plugin-idcard",
+    "spark-plugin-luhn",
 ];
 
 /// 建临时插件目录并拷入三个组件，返回目录路径。
@@ -46,7 +47,7 @@ fn dropped_wasm_is_registered() {
     let found = host.discover(&dir);
     let mut names: Vec<_> = found.iter().map(|(_, info)| info.name.clone()).collect();
     names.sort();
-    assert_eq!(names, ["attacker", "idcard", "reverse", "upper"]);
+    assert_eq!(names, ["attacker", "idcard", "luhn", "reverse", "upper"]);
 }
 
 #[test]

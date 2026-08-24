@@ -30,6 +30,7 @@ cd spark-plugin && cargo component build --release         # 构建插件组件�
 cd spark-plugin-reverse && cargo component build --release # reverse
 cd spark-plugin-attacker && cargo component build --release # attacker（恶意示例，安全验证）
 cd spark-plugin-idcard && cargo component build --release   # idcard（真实业务算法：身份证校验）
+cd spark-plugin-luhn && cargo component build --release     # luhn（真实业务算法：银行卡号校验）
 cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/spark_plugin.wasm <input>
 ```
 

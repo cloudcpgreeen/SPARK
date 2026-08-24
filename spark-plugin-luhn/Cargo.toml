@@ -1,0 +1,17 @@
+[package]
+name = "spark-plugin-luhn"
+version = "0.2.0"
+edition = "2021"
+license = "GPL-3.0-only"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen-rt = "0.41"
+
+[package.metadata.component]
+package = "spark:runtime"
+
+# 独立于根 workspace：仅由 `cargo component build` 构建。
+[workspace]

@@ -42,4 +42,4 @@ cargo run -p spark-host -- run upper hi   # 按名字运行
 
 写一个满足 `plugin-world` 契约的组件（见 `wit/runtime.wit`），宿主零改动即可加载。
 
-现有示例插件：`spark-plugin`（upper，输入转大写）、`spark-plugin-reverse`（reverse，输入倒序）、`spark-plugin-attacker`（恶意示例，安全验证用：CPU/内存炸弹会被沙箱切断）、`spark-plugin-idcard`（真实业务算法：中国身份证号校验，返回性别/出生日期/地区或声明式错误）。四个插件用同一个 `spark-host` 二进制加载，宿主零改动。
+现有示例插件：`spark-plugin`（upper，输入转大写）、`spark-plugin-reverse`（reverse，输入倒序）、`spark-plugin-attacker`（恶意示例，安全验证用：CPU/内存炸弹会被沙箱切断）、`spark-plugin-idcard`（真实业务算法：中国身份证号校验，返回性别/出生日期/地区或声明式错误）、`spark-plugin-luhn`（真实业务算法：银行卡号 Luhn 校验 + 卡组织识别）。五个插件用同一个 `spark-host` 二进制加载，宿主零改动。
