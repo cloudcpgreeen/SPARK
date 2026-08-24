@@ -17,6 +17,8 @@
 | [`RELATIONSHIPS.md`](RELATIONSHIPS.md) | 人物关系图：圣经里的所有人物与关系，一张网收束 |
 | [`REFERENCE.md`](REFERENCE.md) | 技术参考：WIT 契约原文 / 宿主 API / 沙箱参数 / 错误码全集 / CLI——全部用技术术语钉死 |
 | [`ESSAY.md`](ESSAY.md) | 理念外一篇：论论文安全——不是防学生，是护写作者 |
+| [`CURIOSITY.md`](CURIOSITY.md) | 理念外·最童趣篇之一：好奇心就够了（Curiosity is All You Need） |
+| [`LOVE.md`](LOVE.md) | 理念外·最童趣篇之二：但爱是最好的（But Love is The Best）——整个故事的钥匙 |
 
 ## 结构
 
