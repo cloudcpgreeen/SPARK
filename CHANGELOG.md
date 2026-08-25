@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-25
+
+### 新增
+
+- **文档十二篇收全**：REFERENCE（技术参考：WIT 契约原文 / 宿主 API / 沙箱参数 / 错误码全集 / CLI）、CURIOSITY + LOVE（最童趣收尾篇：好奇心够了，但爱是最好的）、MANIFESTO 文档索引补全、README badges（license/CI/tag）+ 社区入口。
+- **开源标准全套**：Cargo 元数据（`[workspace.package]` 共享，core/host 继承并补 description/repository/keywords/categories，5 插件补 repository/description）、GitHub Actions CI（fmt + clippy + 单元测试 + 插件集成测试 18 个无 skip）、CONTRIBUTING / CODE_OF_CONDUCT / CHANGELOG、issue/PR 模板、.editorconfig。
+
+### 修复
+
+- spark-core 契约注释引用 `wit/spark.wit` → `wit/core.wit`（实际权威文件，纯文档修正）。
+- 修 clippy `doc_lazy_continuation` 告警；`cargo fmt` 归整。
+
 ## [1.0.0] - 2026-08-24
 
 ### 新增
@@ -23,5 +35,6 @@
 
 - epoch deadline 取 `当前 epoch + 2` 而非 `+1`：消除 bump 线程竞态导致的偶发误 trap。
 
-[Unreleased]: https://github.com/cloudcpgreeen/SPARK/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/cloudcpgreeen/SPARK/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/cloudcpgreeen/SPARK/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/cloudcpgreeen/SPARK/releases/tag/v1.0.0
