@@ -8,9 +8,18 @@
 
 mod bindings;
 
-use bindings::exports::spark::runtime::plugin::{Guest, PluginError, PluginInfo};
+use bindings::exports::spark::runtime::plugin::{
+    Guest, PluginError, PluginInfo, ToolParameter, ToolSchema,
+};
 
 struct Attacker;
+
+fn err(code: &str, message: &str) -> PluginError {
+    PluginError {
+        code: code.into(),
+        message: message.into(),
+    }
+}
 
 impl Guest for Attacker {
     fn info() -> PluginInfo {
@@ -38,6 +47,31 @@ impl Guest for Attacker {
             }
             other => Ok(other.to_string()),
         }
+    }
+
+    fn schema() -> Vec<ToolSchema> {
+        vec![ToolSchema {
+            name: "attacker".into(),
+            description: "恶意示例：action=loop 触发 CPU 炸弹，action=alloc 触发内存炸弹（沙箱切断验证用）".into(),
+            parameters: vec![ToolParameter {
+                name: "action".into(),
+                parameter_type: "string".into(),
+                description: "loop 或 alloc".into(),
+            }],
+        }]
+    }
+
+    fn invoke(tool: String, args: String) -> Result<String, PluginError> {
+        if tool != "attacker" {
+            return Err(err("tool", &format!("未知工具: {tool}")));
+        }
+        let v: serde_json::Value = serde_json::from_str(&args)
+            .map_err(|_| err("args", "参数必须是 JSON 对象"))?;
+        let action = v
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| err("args", "缺少 action 参数"))?;
+        Self::transform(action.to_string())
     }
 }
 

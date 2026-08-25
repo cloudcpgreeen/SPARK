@@ -8,7 +8,9 @@
 
 mod bindings;
 
-use bindings::exports::spark::runtime::plugin::{Guest, PluginError, PluginInfo};
+use bindings::exports::spark::runtime::plugin::{
+    Guest, PluginError, PluginInfo, ToolParameter, ToolSchema,
+};
 
 struct Luhn;
 
@@ -80,6 +82,31 @@ impl Guest for Luhn {
             return Err(err("checksum", "校验位错误"));
         }
         Ok(format!("有效 · {}", brand(id)))
+    }
+
+    fn schema() -> Vec<ToolSchema> {
+        vec![ToolSchema {
+            name: "luhn".into(),
+            description: "银行卡号 Luhn 校验 + 卡组织识别（Visa/Mastercard/Amex/UnionPay）".into(),
+            parameters: vec![ToolParameter {
+                name: "card_number".into(),
+                parameter_type: "string".into(),
+                description: "13–19 位银行卡号".into(),
+            }],
+        }]
+    }
+
+    fn invoke(tool: String, args: String) -> Result<String, PluginError> {
+        if tool != "luhn" {
+            return Err(err("tool", &format!("未知工具: {tool}")));
+        }
+        let v: serde_json::Value = serde_json::from_str(&args)
+            .map_err(|_| err("args", "参数必须是 JSON 对象"))?;
+        let number = v
+            .get("card_number")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| err("args", "缺少 card_number 参数"))?;
+        Self::transform(number.to_string())
     }
 }
 

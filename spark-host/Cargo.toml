@@ -12,3 +12,5 @@ readme = "../README.md"
 [dependencies]
 anyhow = "1"
 wasmtime = { version = "47", features = ["component-model"] }
+serde_json = "1"
+ureq = { version = "2", features = ["json"] }

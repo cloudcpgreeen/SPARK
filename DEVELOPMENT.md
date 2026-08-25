@@ -26,19 +26,17 @@ spark/
 
 ```bash
 cargo build / cargo test                     # 根 workspace（spark-core + spark-host）
-cd spark-plugin && cargo component build --release         # 构建插件组件（upper）
-cd spark-plugin-reverse && cargo component build --release # reverse
-cd spark-plugin-attacker && cargo component build --release # attacker（恶意示例，安全验证）
-cd spark-plugin-idcard && cargo component build --release   # idcard（真实业务算法：身份证校验）
-cd spark-plugin-luhn && cargo component build --release     # luhn（真实业务算法：银行卡号校验）
+./build-plugins.sh                                          # 一键构建全部 6 个插件并装入 plugins/（逐个 cargo component build 的等价物）
 cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/spark_plugin.wasm <input>
 cargo run -p spark-host -- pipe <input> upper reverse   # 流水线：输出串联，任一步失败即 fail-fast
+cargo run -p spark-host -- agent "把 hello 转大写"       # Agent 回路：本地算法预测 + 沙箱工具调用（无网络）
+cargo run -p spark-host -- agent "把 hello 转大写" --model flash  # DeepSeek harness（需 DEEPSEEK_API_KEY，Key 只走环境变量）
 ```
 
 - 插件组件固定 `--target wasm32-unknown-unknown`（`.cargo/config.toml` 已钉死），产物零 WASI import，纯粹导出 `spark:runtime/plugin`。
-- `spark-host` 集成测试覆盖 happy path / 声明式失败（`result` 的 err，`code` 可断言）/ trap 捕获 / trap 后隔离 / 多插件可插拔 / 攻击者切断（`tests/isolation.rs`）、插件自注册与按 name 解析运行（`tests/registry.rs`）、共享 `Host` 多线程并发调用且 trap 不串（`tests/concurrency.rs`）、流水线输出串联与 fail-fast 定位（`tests/pipe.rs`）；组件未构建时自动跳过（先执行上面的 `cargo component build`）。
+- `spark-host` 集成测试覆盖 happy path / 声明式失败（`result` 的 err，`code` 可断言）/ trap 捕获 / trap 后隔离 / 多插件可插拔 / 攻击者切断（`tests/isolation.rs`）、插件自注册与按 name 解析运行（`tests/registry.rs`）、共享 `Host` 多线程并发调用且 trap 不串（`tests/concurrency.rs`）、流水线输出串联与 fail-fast 定位（`tests/pipe.rs`）、Agent 回路（决策 → 沙箱调用 → 结果喂回，`tests/agent.rs`）、金额转大写（`tests/rmb.rs`）、DeepSeek harness 离线单测（消息组装 / tools 映射 / 响应解析，`src/deepseek.rs`）；组件未构建时自动跳过（先执行上面的 `cargo component build`）。
 - 沙箱资源有界：CPU 走 epoch 时间预算、内存走 StoreLimits（见 [SECURITY.md](SECURITY.md)）。
-- 测试不依赖网络/外部服务。
+- 测试不依赖网络/外部服务：harness 的 HTTP 调用只在带 `DEEPSEEK_API_KEY` 手动执行 `agent --model` 时发生，测试套件不打真实网络。
 
 ## 3. 代码风格（ponytail）
 
@@ -56,4 +54,4 @@ cargo run -p spark-host -- pipe <input> upper reverse   # 流水线：输出串�
 ## 5. 测试纪律
 
 - 契约验收测试按接口语义断言（输入 → 期望输出），不测实现细节。
-- `spark-core::contract_version()` 必须与 `wit/core.wit` 的 package 版本对齐（当前 `0.1.0`）；宿主/插件契约版本以 `wit/runtime.wit`（`spark:runtime@0.3.0`）为准——契约与实现脱节是 bug。
+- `spark-core::contract_version()` 必须与 `wit/core.wit` 的 package 版本对齐（当前 `0.1.0`）；宿主/插件契约版本以 `wit/runtime.wit`（`spark:runtime@0.4.0`）为准——契约与实现脱节是 bug。

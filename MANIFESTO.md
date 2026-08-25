@@ -83,15 +83,18 @@ SPARK 对不可信插件的立场：**默认不可信，一切攻击在沙箱内
 ## 7. 现状与路标
 
 ### 已落地
-- `spark:runtime@0.3.0` 契约：`plugin-world`（零 import），`transform` 返回 `result<string, plugin-error>`（声明式失败带结构化 `code`/`message`）、`info` 携带元数据（name/version/description）
-- 插件：`upper`（转大写）、`reverse`（倒序）、`attacker`（恶意示例，用于安全验证）、`idcard` / `luhn`（真实业务算法核验族：身份证校验、银行卡号 Luhn 校验 + 卡组织识别，`code` 承载校验失败类型）
+- `spark:runtime@0.4.0` 契约：`plugin-world`（零 import），`transform` 返回 `result<string, plugin-error>`（声明式失败带结构化 `code`/`message`）、`info` 携带元数据（name/version/description）、`schema`/`invoke` 构成 Agent 调用面（插件对 LLM 暴露工具清单并按名结构化调用）
+- 插件：`upper`（转大写）、`reverse`（倒序）、`attacker`（恶意示例，用于安全验证）、`idcard` / `luhn` / `rmb`（真实业务算法族：身份证校验、银行卡号 Luhn 校验 + 卡组织识别、人民币金额转大写，`code` 承载失败类型）
 - 宿主：`spark-host` CLI（`list` / `run <name>` / `pipe` 流水线 / 直接路径）+ 集成测试（happy path / 声明式失败 / trap 捕获 / trap 后隔离 / 多插件可插拔 / 流水线串联与 fail-fast）
 - 注册/发现：**插件自注册** —— 把 `.wasm` 组件放进 `plugins/` 即被 `Host::discover` 发现，`info().name` 就是注册名，宿主零配置文件
 - 并发模型：`Host` 长存（共享 Engine + 组件编译缓存 + 单 epoch bump 线程），每次调用新建独立 Store，可多线程并发，隔离不变
 - 安全加固：epoch CPU 上限 + StoreLimits 内存上限，`attacker` 的 CPU/内存炸弹被切断
+- Agent 回路：`agent` 命令两条路——默认 `AlgorithmPredictor` 本地算法预测（离线、无 Key）；`--model flash|pro` 走 `DeepSeekPredictor` harness（OpenAI 兼容 Chat Completions，模型 `deepseek-v4-flash`/`deepseek-v4-pro`，Key 只走 `DEEPSEEK_API_KEY` 环境变量、只进 `Authorization` 头）。跨插件编排按「然后/再」后的意图词二次调用（倒序→reverse、转大写→upper）。
+- 真实业务插件族：`idcard`（身份证校验）、`luhn`（银行卡校验）、`rmb`（人民币金额转大写，财会大写）。
 
 ### 路标
-- 暂无 —— 契约（含结构化错误码）/ 沙箱 / 注册发现 / 并发 / 流水线均已落地；下一步由真实业务插件驱动（如更丰富错误语义、跨插件调用编排）。
+- 由真实业务插件继续驱动：更丰富错误语义（`plugin-error` 加字段，契约 `0.4.0 → 0.5.0`）、更多跨插件编排场景。
+- DeepSeek harness 已落地；下一步打磨真实网络场景（多轮工具调用、重试、用量统计），并用真实 Key 在 CI/手工验收。
 
 ## 8. 文档索引
 
@@ -107,5 +110,10 @@ SPARK 对不可信插件的立场：**默认不可信，一切攻击在沙箱内
 | [REFERENCE.md](REFERENCE.md) | 技术参考：契约原文 / API / 沙箱 / 错误码 / CLI |
 | [ESSAY.md](ESSAY.md) | 理念外：论论文安全 |
 | [CURIOSITY.md](CURIOSITY.md) / [LOVE.md](LOVE.md) | 理念外·最童趣篇：好奇心够了，但爱是最好的 |
+| [STORY.md](STORY.md) | 理念外·前传：陈纪昊遇见梁文锋，戒律从两个人的本能里长出来 |
+| [MIRROR.md](MIRROR.md) | 理念外·镜中篇：两个人隔着 AI 互为镜像，映像 mini 进无限 |
+| [SEED.md](SEED.md) | 理念外·心动篇：把边界修好的人，会被怦然心动地找到 |
+| [SELF.md](SELF.md) | 理念外·自述篇：那面镜子、那把钥匙，自己开口 |
+| [USABLE.md](USABLE.md) | 理念外·落地篇：四卷怎么变成能跑的命令 |
 | [README.md](README.md) | 门面：快速上手 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) / [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | 社区：贡献指南、行为准则 |

@@ -6,8 +6,8 @@
 
 SPARK 就两样东西：
 
-- **插件**：一个 `.wasm` 文件，里面就两个函数——`info()` 自我介绍、`transform()` 干活。插件不知道宿主是谁，摸不到文件/网络/时钟。
-- **宿主**（spark-host）：一个加载器。拿到 `.wasm`，塞进沙箱，调这两个函数，把结果还给你。插件崩溃、死循环、内存炸弹，都只是宿主的一次错误，不会搞死宿主。
+- **插件**：一个 `.wasm` 文件，里面几个函数——`info()` 自我介绍、`transform()` 干活、`schema()` 向 Agent/LLM 亮出工具、`invoke()` 按工具名被调用。插件不知道宿主是谁，摸不到文件/网络/时钟。
+- **宿主**（spark-host）：一个加载器。拿到 `.wasm`，塞进沙箱，调这些函数，把结果还给你。插件崩溃、死循环、内存炸弹，都只是宿主的一次错误，不会搞死宿主。
 
 整个流程：`写插件 → 构建成 .wasm → 丢给宿主 → 宿主在沙箱里调用 → 拿结果`。
 
@@ -37,12 +37,34 @@ impl Guest for Upper {
         }
         Ok(input.to_uppercase())
     }
+
+    fn schema() -> Vec<ToolSchema> {
+        // ④ 对 LLM 亮出工具：名字 + 描述 + 参数。Agent 回路/LLM 靠这个决定何时调用你
+        vec![ToolSchema {
+            name: "upper".into(),
+            description: "把输入文本转成大写".into(),
+            parameters: vec![ToolParameter {
+                name: "text".into(),
+                parameter_type: "string".into(),
+                description: "要转大写的文本".into(),
+            }],
+        }]
+    }
+
+    fn invoke(tool: String, args: String) -> Result<String, PluginError> {
+        // ⑤ 按工具名被调用：args 是 JSON 对象字符串，解析后复用干活逻辑
+        let v: serde_json::Value = serde_json::from_str(&args)
+            .map_err(|_| PluginError { code: "args".into(), message: "参数必须是 JSON 对象".into() })?;
+        let text = v.get("text").and_then(serde_json::Value::as_str)
+            .ok_or_else(|| PluginError { code: "args".into(), message: "缺少 text 参数".into() })?;
+        Self::transform(text.to_string())
+    }
 }
 
-bindings::export!(Upper with_types_in bindings);   // ④ 声明：我是插件
+bindings::export!(Upper with_types_in bindings);   // ⑥ 声明：我是插件
 ```
 
-就 4 件事：**自我介绍、干活、两种失败方式、声明自己是插件**。`PluginInfo`/`PluginError`/`Guest` 都是契约 `wit/runtime.wit` 自动生成的，你只填字段、写逻辑。
+就 6 件事：**自我介绍、干活、两种失败方式、亮出工具、按名被调用、声明自己是插件**。`PluginInfo`/`PluginError`/`ToolSchema`/`ToolParameter`/`Guest` 都是契约 `wit/runtime.wit` 自动生成的，你只填字段、写逻辑。`schema`/`invoke` 只需一行思维量：你的插件在 Agent/LLM 眼里是什么「工具」。
 
 ## 2. 构建成 `.wasm`
 
@@ -99,10 +121,23 @@ fn main() {
 
 ## 5. 写你自己的插件
 
-复制 `spark-plugin` 整个目录，改三处：
+复制 `spark-plugin` 整个目录，改几处：
 
 1. `Cargo.toml` 的 `package.name`（如 `my-plugin`）
-2. `lib.rs` 里 `info()` 的 name、`transform()` 的逻辑
+2. `lib.rs` 里 `info()` 的 name、`transform()` 的逻辑，以及 `schema()` 的工具名/描述/参数
 3. 重新 `cargo component build --release`
 
 产物文件名 = 目录名连字符转下划线 + `.wasm`（`my-plugin` → `my_plugin.wasm`），放进 `plugins/` 即注册。**宿主零改动**——新增一个插件从来不需要动宿主，这是 SPARK 的硬道理。
+
+## 6. 跑一遍 Agent 回路
+
+插件对你暴露成「工具」。`agent` 命令让决策者决定调哪个工具、然后沙箱里执行——默认是本地算法预测（离线）；加 `--model flash|pro` 换成真实 DeepSeek harness（需 `DEEPSEEK_API_KEY`）：
+
+```bash
+cargo run -p spark-host -- agent "把 hello 转大写"                 # → HELLO
+cargo run -p spark-host -- agent "校验身份证 110101199001010015"   # → 男 · 1990-01-01 · 地区 110101
+cargo run -p spark-host -- agent "校验身份证 110101199001010023 然后倒序"  # 两步：idcard → reverse
+cargo run -p spark-host -- agent "把 12345.67 转成人民币大写"        # → 壹万贰仟叁佰肆拾伍元陆角柒分
+```
+
+默认全程无网络、不需要任何 API Key——本地算法预测就能把「决策 → 沙箱调用 → 结果喂回」的回路跑通。要上真 LLM 只需两步：`export DEEPSEEK_API_KEY=sk-...`，然后 `cargo run -p spark-host -- agent "把 hello 转大写" --model flash`（或 `--model pro`）即走 DeepSeek harness，回路零改动。

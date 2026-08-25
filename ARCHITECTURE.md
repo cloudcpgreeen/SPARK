@@ -20,6 +20,7 @@ SPARK 不是一次设计出来的，是一步步**被真实需求逼出来的**�
 | **Host 长存 + 并发** | 从「每次调用新建 Engine」进化到共享 Engine + 组件编译缓存 + 单 epoch bump 线程；每次调用新建独立 Store；方法取 `&self` 多线程并发 | `Component::from_file` 每次调用都是完整编译（贵）；要支持多线程且隔离不变 |
 | **0.3.0 结构化错误** | `transform -> result<string, plugin-error>`（code/message） | **流水线是消费方**：要按错误类型分支、定位失败步骤，裸 string 承载不了 |
 | **流水线 pipe** | 输出串联，任一步 fail-fast 并定位 | 把核验做成真链：idcard → luhn 各自独立又能接成链 |
+| **0.4.0 Agent 调用面** | `schema()` 暴露 LLM 可见工具清单 + `invoke(tool, args)` 结构化调用；宿主加 `schemas`/`invoke` + `agent` 回路模块 | 融合 rhua-chatgpt-web 的「插件 = LLM 工具」模式，但把不可信 JS 换成沙箱 WASM 组件 |
 
 每个阶段都由一个具体痛点驱动，不是凭空加功能。
 
@@ -27,7 +28,7 @@ SPARK 不是一次设计出来的，是一步步**被真实需求逼出来的**�
 
 ### 2.1 契约层（wit/）
 
-- `wit/runtime.wit`：`plugin-world` 世界，导出 `spark:runtime/plugin` 接口。**零 import，连 WASI 都不 import**——插件摸不到文件/网络/时钟，攻击面最小。
+- `wit/runtime.wit`：`plugin-world` 世界，导出 `spark:runtime/plugin` 接口。**零 import，连 WASI 都不 import**——插件摸不到文件/网络/时钟，攻击面最小。0.4.0 起接口含 `info`/`transform`（原调用面）+ `schema`/`invoke`（Agent 调用面）。
 - 宿主 `bindgen!({ path, world })` 钉死契约版本：加载不匹配组件时 `instantiate` 直接失败，不需要显式版本检查函数。
 - 宿主端 bindgen 生成类型路径：`crate::exports::spark::runtime::plugin::{PluginInfo, PluginError}`（不在 crate root，编译报 E0425 时按 rustc 建议 import）。
 - `spark:core@0.1.0`（`wit/core.wit`）是领域骨架契约，对应 `spark-core` 的 `contract_version()`。
@@ -64,13 +65,21 @@ Host {
 
 - 每个插件是**独立 workspace**，`crate-type = ["cdylib"]`，依赖 `wit-bindgen-rt`，`[package.metadata.component] package = "spark:runtime"`。
 - 构建目标**钉死 `wasm32-unknown-unknown`**（`.cargo/config.toml`）→ 产物零 WASI import。不用 wasip1/wasip2：那会把 `wasi:cli/io` 拖进组件，破坏最小能力。
-- 插件实现 `Guest` trait：`info()`（name/version/description，version 用 `env!("CARGO_PKG_VERSION")`）+ `transform(input)`。
+- 插件实现 `Guest` trait：`info()`（name/version/description，version 用 `env!("CARGO_PKG_VERSION")`）+ `transform(input)`（原调用面）+ `schema()`（工具清单）+ `invoke(tool, args_json)`（Agent 调用面）。`invoke` 解析 JSON 参数后复用 `transform` 逻辑。
+- 依赖 `wit-bindgen-rt` + `serde_json`（编译期库，**运行时组件仍零 import**，沙箱零能力不变）。
 - 导出宏用**两参形式**：`bindings::export!(Upper with_types_in bindings)`（单参版会编译失败）。
 
 ### 2.5 流水线（pipe）
 
 - `Host::pipe(dir, input, names)`：`discover` 找名字 → 逐个 `run`，前一步输出喂下一步。
 - `PipeFailure::Declined { step, error }`（声明式失败，`error.code` 可编程分支）/ `PipeFailure::Trap { step, detail }`（trap，`detail` 含 wasm backtrace 定位崩溃点）。
+
+### 2.6 Agent 回路（`spark-host/src/agent.rs`）
+
+- **插件 = LLM 可见的工具**（借鉴 rhua-chatgpt-web 的插件模型）：`Host::schemas` 收集各插件 `schema()` → `(工具名, 插件文件, 插件信息)` 注册表；`Host::invoke` 在沙箱里按工具名调用。
+- **决策者 = `Predictor` trait**：`decide(prompt, history, tools) -> Decision`。两个实现共用一个回路：`AlgorithmPredictor`（本地关键词算法，离线）；`DeepSeekPredictor`（`spark-host/src/deepseek.rs`，OpenAI 兼容 Chat Completions 真实 harness，`--model flash|pro` 激活）。换决策者宿主回路零改动。
+- **回路 `run_agent`**：Predictor 决策 → `Host::invoke`（fresh Store + epoch + 16MiB）→ 结果按不可信数据包装、截断（`TOOL_RESULT_LIMIT`=4096）→ 喂回 → Final 或到 `MAX_STEPS`=8。
+- **CLI**：`spark-host agent "<prompt>"` 走离线算法；`--model flash|pro` 走 DeepSeek harness（需 `DEEPSEEK_API_KEY`，Key 只进 `Authorization` 头）。
 
 ## 3. 关键取舍（为什么是这些做法，而不是别的）
 
@@ -79,6 +88,7 @@ Host {
 - **自注册不是配置文件**：`.wasm` 放进去就有，宿主零改动——这是可扩展性的证明，也是纪律。
 - **0.3.0 才做结构化错误**：先有消费方（流水线）再富类型，不凭空造类型。
 - **同步调用**：单次调用阻塞调用线程，但被 epoch 切断、阻塞有界；`Host` 线程安全，多线程并发互不干扰。
+- **决策者留 trait 缝，先用本地算法**：接真实 LLM 前先用关键词规则跑通「决策 → 沙箱调用 → 结果喂回」的回路，验证最小可能性；DeepSeek 只留 `Predictor` 插入点，不先接网络、不先存 Key。
 
 ## 4. 文档地图（完整版怎么拼）
 

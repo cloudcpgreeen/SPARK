@@ -1,5 +1,7 @@
 use std::process::ExitCode;
 
+use spark_host::agent::{run_agent, AlgorithmPredictor, Predictor, MAX_STEPS};
+use spark_host::deepseek::DeepSeekPredictor;
 use spark_host::{Host, PipeFailure};
 
 const PLUGINS_DIR: &str = "plugins";
@@ -17,12 +19,61 @@ fn main() -> ExitCode {
         [cmd] if cmd == "list" => list(&host),
         [cmd, name, input] if cmd == "run" => run_named(&host, name, input),
         [cmd, input, names @ ..] if cmd == "pipe" => pipe(&host, input, names),
+        [cmd, prompt, rest @ ..] if cmd == "agent" => agent(&host, prompt, rest),
         [wasm, input] => run_path(&host, wasm, input),
         _ => {
-            eprintln!("usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list");
+            eprintln!(
+                "usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list | agent <prompt> [--model flash|pro]"
+            );
             ExitCode::from(2)
         }
     }
+}
+
+/// Agent 命令：`spark-host agent "<prompt>" [--model flash|pro]`。
+/// 不带 `--model` = 本地算法预测（离线，无需 Key）；带 `--model` = DeepSeek harness（需 `DEEPSEEK_API_KEY`）。
+fn agent(host: &Host, prompt: &str, rest: &[String]) -> ExitCode {
+    let mut model = String::new();
+    let mut i = 0;
+    while i < rest.len() {
+        match (rest[i].as_str(), rest.get(i + 1)) {
+            ("--model", Some(m)) => {
+                model = m.clone();
+                i += 2;
+            }
+            (other, _) => {
+                eprintln!("未知参数: {other}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let predictor: Box<dyn Predictor>;
+    if model.is_empty() {
+        predictor = Box::new(AlgorithmPredictor);
+    } else {
+        let key = match std::env::var("DEEPSEEK_API_KEY") {
+            Ok(k) if !k.is_empty() => k,
+            _ => {
+                eprintln!("--model {model} 需要 DEEPSEEK_API_KEY 环境变量（Key 只走环境变量，不进 prompt/日志）");
+                return ExitCode::from(2);
+            }
+        };
+        match DeepSeekPredictor::new(key, &model) {
+            Ok(h) => {
+                predictor = Box::new(h);
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let result = run_agent(host, PLUGINS_DIR, prompt, predictor.as_ref(), MAX_STEPS);
+    for call in &result.calls {
+        eprintln!("  → {}", call.rendered);
+    }
+    println!("{}", result.answer);
+    ExitCode::SUCCESS
 }
 
 /// 发现并列出 `plugins/` 下的插件（name = 组件自注册名）。

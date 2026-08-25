@@ -26,7 +26,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::exports::spark::runtime::plugin::{PluginError, PluginInfo};
+use crate::exports::spark::runtime::plugin::{PluginError, PluginInfo, ToolSchema};
+
+pub mod agent;
+pub mod deepseek;
 use anyhow::Result;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
@@ -146,6 +149,49 @@ impl Host {
             }
         }
         found
+    }
+
+    /// Agent 调用面：读单个插件组件的工具清单（`schema()`），沙箱内执行。
+    fn schema_of(&self, wasm_path: &str) -> Result<Vec<ToolSchema>> {
+        let component = self.component(wasm_path)?;
+        let linker = Linker::new(&self.engine);
+        let mut store = new_store(&self.engine);
+        let instance = PluginWorld::instantiate(&mut store, &component, &linker)?;
+        Ok(instance.spark_runtime_plugin().call_schema(&mut store)?)
+    }
+
+    /// Agent 调用面：发现 `dir` 下所有插件的工具清单。
+    /// 返回 `(文件名, 插件信息, 工具清单)`；读 schema 失败的组件跳过并提示，不中断整批。
+    pub fn schemas(&self, dir: &str) -> Vec<(String, PluginInfo, Vec<ToolSchema>)> {
+        self.discover(dir)
+            .into_iter()
+            .filter_map(
+                |(file, info)| match self.schema_of(&format!("{dir}/{file}")) {
+                    Ok(tools) => Some((file, info, tools)),
+                    Err(e) => {
+                        eprintln!("跳过 {file} 的 schema：{e:#}");
+                        None
+                    }
+                },
+            )
+            .collect()
+    }
+
+    /// Agent 调用面：按工具名调用插件（`invoke(tool, args_json)`），沙箱隔离与资源上限不变。
+    pub fn invoke(
+        &self,
+        wasm_path: &str,
+        tool: &str,
+        args_json: &str,
+    ) -> Result<(PluginInfo, std::result::Result<String, PluginError>)> {
+        let component = self.component(wasm_path)?;
+        let linker = Linker::new(&self.engine);
+        let mut store = new_store(&self.engine);
+        let instance = PluginWorld::instantiate(&mut store, &component, &linker)?;
+        let plugin = instance.spark_runtime_plugin();
+        let info = plugin.call_info(&mut store)?;
+        let out = plugin.call_invoke(&mut store, tool, args_json)?;
+        Ok((info, out))
     }
 
     /// 插件流水线：输入依次经过 `names` 各插件，前一步输出喂给下一步。

@@ -10,9 +10,18 @@
 
 mod bindings;
 
-use bindings::exports::spark::runtime::plugin::{Guest, PluginError, PluginInfo};
+use bindings::exports::spark::runtime::plugin::{
+    Guest, PluginError, PluginInfo, ToolParameter, ToolSchema,
+};
 
 struct Upper;
+
+fn err(code: &str, message: &str) -> PluginError {
+    PluginError {
+        code: code.into(),
+        message: message.into(),
+    }
+}
 
 impl Guest for Upper {
     fn info() -> PluginInfo {
@@ -34,6 +43,31 @@ impl Guest for Upper {
             });
         }
         Ok(input.to_uppercase())
+    }
+
+    fn schema() -> Vec<ToolSchema> {
+        vec![ToolSchema {
+            name: "upper".into(),
+            description: "把输入文本转成大写".into(),
+            parameters: vec![ToolParameter {
+                name: "text".into(),
+                parameter_type: "string".into(),
+                description: "要转大写的文本".into(),
+            }],
+        }]
+    }
+
+    fn invoke(tool: String, args: String) -> Result<String, PluginError> {
+        if tool != "upper" {
+            return Err(err("tool", &format!("未知工具: {tool}")));
+        }
+        let v: serde_json::Value = serde_json::from_str(&args)
+            .map_err(|_| err("args", "参数必须是 JSON 对象"))?;
+        let text = v
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| err("args", "缺少 text 参数"))?;
+        Self::transform(text.to_string())
     }
 }
 

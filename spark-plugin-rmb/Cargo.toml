@@ -1,10 +1,10 @@
 [package]
-name = "spark-plugin-attacker"
+name = "spark-plugin-rmb"
 version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/cloudcpgreeen/SPARK"
-description = "SPARK 安全验证插件：CPU/内存炸弹，被沙箱切断（自食其果）"
+description = "SPARK 真实业务插件：人民币金额转大写（财会大写）"
 
 [lib]
 crate-type = ["cdylib"]

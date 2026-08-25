@@ -12,7 +12,9 @@
 
 mod bindings;
 
-use bindings::exports::spark::runtime::plugin::{Guest, PluginError, PluginInfo};
+use bindings::exports::spark::runtime::plugin::{
+    Guest, PluginError, PluginInfo, ToolParameter, ToolSchema,
+};
 
 struct Idcard;
 
@@ -89,6 +91,31 @@ impl Guest for Idcard {
             &id[12..14],
             &id[0..6]
         ))
+    }
+
+    fn schema() -> Vec<ToolSchema> {
+        vec![ToolSchema {
+            name: "idcard".into(),
+            description: "中国身份证号校验（GB 11643-1999，18 位），返回性别/出生日期/地区或结构化错误".into(),
+            parameters: vec![ToolParameter {
+                name: "id".into(),
+                parameter_type: "string".into(),
+                description: "18 位身份证号".into(),
+            }],
+        }]
+    }
+
+    fn invoke(tool: String, args: String) -> Result<String, PluginError> {
+        if tool != "idcard" {
+            return Err(err("tool", &format!("未知工具: {tool}")));
+        }
+        let v: serde_json::Value = serde_json::from_str(&args)
+            .map_err(|_| err("args", "参数必须是 JSON 对象"))?;
+        let id = v
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| err("args", "缺少 id 参数"))?;
+        Self::transform(id.to_string())
     }
 }
 

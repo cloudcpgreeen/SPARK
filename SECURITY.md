@@ -14,6 +14,8 @@
 | 内存炸弹（无限分配） | StoreLimits 上限（默认 16 MiB） | 越限即 trap |
 | 读文件 / 网络 / 时钟 | 零 import（无 WASI） | 根本没有这些能力 |
 | 崩溃 / panic | trap 捕获 | 宿主进程不崩，实例互不污染 |
+| 恶意工具输出 / 巨量输出（Agent 回路） | 结果按「不可信数据」处理：截断（`TOOL_RESULT_LIMIT`=4096）+ 迭代上限（`MAX_STEPS`=8） | prompt 注入面受限、上下文炸弹受限 |
+| API Key 泄露 | 只在环境变量（将来 `DEEPSEEK_API_KEY`），不进 prompt/日志/工具参数 | 无硬编码、无浏览器 localStorage 存储 |
 
 ## 防线细节（spark-host）
 
@@ -24,6 +26,18 @@
   （刻意**不用 fuel 计量**：`loop`/`br` 指令消耗 0 fuel，空死循环会漏网。）
 - **内存**：`StoreLimitsBuilder::new().memory_size(MEMORY_LIMIT).trap_on_grow_failure(true)`
   放进 store 宿主数据，`MEMORY_LIMIT` 默认 16 MiB。
+- **Agent 回路（`agent` 命令）**：工具 `schema()` 与工具输出都是**不可信数据**（来自不可信组件），
+  宿主按数据包装、截断（`TOOL_RESULT_LIMIT`=4096）喂回决策者，不当作指令；回路有迭代上限
+  （`MAX_STEPS`=8）。沙箱零能力不变——恶意插件的工具输出再毒，也出不了沙箱、碰不到文件/网络/时钟。
+
+## 决策者与 API Key
+
+- 决策者（`Predictor`）在**可信侧**，不进沙箱。`AlgorithmPredictor` 是本地算法，无密钥、离线可跑。
+- DeepSeek harness（`DeepSeekPredictor`，`agent --model flash|pro`）：API Key 只读环境变量
+  `DEEPSEEK_API_KEY`，只走 `Authorization` 头，请求体不含 Key、不进 prompt / 日志 / 工具参数；
+  **不采用** rhua-chatgpt-web 把 API Key 存浏览器 localStorage 的做法（明文、可被任意脚本读走）。
+- harness 发给 LLM 的 tools/schema 与工具输出仍是**不可信数据**：仅作调用上下文，不当作指令；
+  截断（`TOOL_RESULT_LIMIT`=4096）+ 迭代上限（`MAX_STEPS`=8）兜底不变。
 
 ## 验证
 

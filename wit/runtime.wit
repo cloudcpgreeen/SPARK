@@ -1,7 +1,7 @@
 // SPARK 契约 · spark:runtime（约定见 CONTRACT.md）。
 // 组件运行时：插件即组件 —— 领域逻辑做成满足此契约的 WASM 组件，宿主沙箱加载并调用。
 
-package spark:runtime@0.3.0;
+package spark:runtime@0.4.0;
 
 /// 插件接口：宿主（spark-host）对已加载组件唯一的调用面。
 interface plugin {
@@ -19,6 +19,20 @@ interface plugin {
     message: string,
   }
 
+  /// LLM 可见的工具参数：Agent 回路里 Predictor / harness 靠它生成调用参数。
+  record tool-parameter {
+    name: string,
+    parameter-type: string,
+    description: string,
+  }
+
+  /// LLM 可见的工具声明：一个插件可暴露多个工具。
+  record tool-schema {
+    name: string,
+    description: string,
+    parameters: list<tool-parameter>,
+  }
+
   /// 插件信息：名字、版本、一句话描述。
   info: func() -> plugin-info;
 
@@ -26,6 +40,13 @@ interface plugin {
   /// （结构化错误，见 `plugin-error`），也可对特定输入 panic（trap）。
   /// 宿主必须把 `err` 与 trap 都当作可恢复错误处理（沙箱隔离）。
   transform: func(input: string) -> result<string, plugin-error>;
+
+  /// Agent 调用面：返回本组件对 LLM 暴露的工具清单（Agent 回路/注册发现用）。
+  schema: func() -> list<tool-schema>;
+
+  /// Agent 调用面：按工具名调用，`args` 为 JSON 对象字符串（对应所选 tool-schema
+  /// 的参数）。沙箱隔离与资源上限与 `transform` 一致。
+  invoke: func(tool: string, args: string) -> result<string, plugin-error>;
 }
 
 /// 世界：一个可被宿主实例化的插件组件 = 导出 plugin 接口，不依赖宿主任何能力。
