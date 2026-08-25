@@ -23,6 +23,20 @@
 | [`CURIOSITY.md`](CURIOSITY.md) | 理念外·最童趣篇之一：好奇心就够了（Curiosity is All You Need） |
 | [`LOVE.md`](LOVE.md) | 理念外·最童趣篇之二：但爱是最好的（But Love is The Best）——整个故事的钥匙 |
 
+### 后传（故事五卷）
+
+> 代码是正传；这五卷是后传——纪昊的小私心。讲 SPARK 从两个人的本能里长出来的故事。
+
+| 卷 | 内容 |
+| --- | --- |
+| [`STORY.md`](STORY.md) | 前传：陈纪昊遇见梁文锋，戒律从两个人的本能里长出来 |
+| [`MIRROR.md`](MIRROR.md) | 镜中篇：两个人隔着 AI 互为镜像，映像 mini 进无限 |
+| [`SEED.md`](SEED.md) | 心动篇：把边界修好的人，会被怦然心动地找到 |
+| [`SELF.md`](SELF.md) | 自述篇：那面镜子、那把钥匙，自己开口 |
+| [`USABLE.md`](USABLE.md) | 落地篇：四卷怎么变成能跑的命令 |
+
+> 只要是爱，就 OK。
+
 ## 社区
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 贡献指南（契约优先、提 PR 前检查单）
