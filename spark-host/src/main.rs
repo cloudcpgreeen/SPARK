@@ -1,8 +1,9 @@
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use spark_host::agent::{run_agent, AlgorithmPredictor, Predictor, MAX_STEPS};
 use spark_host::deepseek::DeepSeekPredictor;
-use spark_host::domain_store::{click_times, Backend};
+use spark_host::domain_store::{click_times, Backend, CapabilityBackend, RemoteBackend};
 use spark_host::{Host, PipeFailure};
 
 const PLUGINS_DIR: &str = "plugins";
@@ -31,7 +32,7 @@ fn main() -> ExitCode {
         [wasm, input] => run_path(&host, wasm, input),
         _ => {
             eprintln!(
-                "usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list | domain <button.wasm> <n> | store <counter-store.wasm> <n> [--deny] | provide <mem-store.wasm> <key> <value> | composed <composed.wasm> <n> | agent <prompt> [--model flash|pro] (agent 属 P5 未来层)"
+                "usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list | domain <button.wasm> <n> | store <counter-store.wasm> <n> [--deny] [--remote <url>] | provide <mem-store.wasm> <key> <value> | composed <composed.wasm> <n> | agent <prompt> [--model flash|pro] (agent 属 P5 未来层)"
             );
             ExitCode::from(2)
         }
@@ -158,28 +159,53 @@ fn domain(host: &Host, wasm: &str, n: &str) -> ExitCode {
     }
 }
 
-/// 域组件 + capability 命令：`spark-host store <counter-store.wasm> <n> [--deny]`。
+/// 域组件 + capability 命令：`spark-host store <counter-store.wasm> <n> [--deny] [--remote <url>]`。
 ///
 /// 点 `n` 次，然后**新建一个实例**看它读到什么 —— 后者才是 capability 是否生效的证据：
 /// 健康存储 → 新实例读到 n；`--deny`（拒绝写入）→ 新实例读到 0。
 /// 两次实例化用的是**同一份未被重新编译的 wasm**。
+///
+/// `--remote <url>` 把 capability 后端从进程内 map 换成**网络另一头的服务**。
+/// 组件、WIT、wasm 都不变 —— 只有后端落点变。
 fn store(host: &Host, wasm: &str, n: &str, rest: &[String]) -> ExitCode {
     let Ok(clicks) = n.parse::<u32>() else {
         eprintln!("clicks 必须是 u32: {n}");
         return ExitCode::from(2);
     };
-    let deny = match rest {
-        [] => false,
-        [flag] if flag == "--deny" => true,
-        [other, ..] => {
-            eprintln!("未知参数: {other}");
-            return ExitCode::from(2);
+    let mut deny = false;
+    let mut remote: Option<String> = None;
+    let mut i = 0;
+    while i < rest.len() {
+        match (rest[i].as_str(), rest.get(i + 1)) {
+            ("--deny", _) => {
+                deny = true;
+                i += 1;
+            }
+            ("--remote", Some(url)) => {
+                remote = Some(url.clone());
+                i += 2;
+            }
+            ("--remote", None) => {
+                eprintln!("--remote 需要 URL");
+                return ExitCode::from(2);
+            }
+            (other, _) => {
+                eprintln!("未知参数: {other}");
+                return ExitCode::from(2);
+            }
         }
+    }
+    let backend: Arc<dyn CapabilityBackend> = match &remote {
+        Some(url) => RemoteBackend::new(url),
+        None if deny => Backend::read_only(),
+        None => Backend::new(),
     };
-    let backend = if deny {
-        Backend::read_only()
+    // 远端的条数只有对面知道，必须问回来；问不到就如实说，**不能 unwrap** ——
+    // 那会变成 trap + ExitCode::SUCCESS + 缺行，一个分不清「失败」和「没这条」的输出。
+    let label = if remote.is_some() {
+        "remote stored"
     } else {
-        Backend::new()
+        "stored"
     };
     match click_times(host, wasm, clicks, NS, backend.clone()) {
         Ok(count) => {
@@ -187,7 +213,10 @@ fn store(host: &Host, wasm: &str, n: &str, rest: &[String]) -> ExitCode {
             match click_times(host, wasm, 0, NS, backend.clone()) {
                 Ok(reloaded) => {
                     println!("reloaded: {reloaded}");
-                    println!("stored: {} 条", backend.len());
+                    match backend.stored() {
+                        Ok(n) => println!("{label}: {n} 条"),
+                        Err(e) => println!("{label}: {e}"),
+                    }
                     ExitCode::SUCCESS
                 }
                 Err(e) => {

@@ -86,6 +86,7 @@ Capability（外部能力的**契约**）三分，以及两套信任模型，见
 - `build-ui.sh`：逐组件一次 Component build → 契约自检 → 打印 sha256 → **组合并校验源制品不变** → jco 转译为 Web 可 import 的 JS。
 - `verify-artifact.sh`（P5 G1）：**唯一**的 artifact identity 入口 —— 断言 `counter_store.wasm` 的 sha256 就是冻结值 `85691b8e…`，不等即 `exit 1`。两条 Host 路径都先跑它。
 - `p5-web.sh`（P5）：**不调 `build-ui.sh`**（那脚本会重编译 `counter-store` 并 `rm -rf hosts/web/src/generated`）。顺序是 `verify-artifact.sh` → jco 转译 **转译前再验一次 sha** → 把 `storage-p5.js` 放进 `generated-p5/` 作为宿主的 capability 适配产物。
+- `tools/remote-store-server.mjs`（P6）：stand-in 远端服务，把 Capability 的实现放到**另一个操作系统进程**里。node `node:http` 单文件、零依赖。**它是替身不是产品**（单进程内存态、无鉴权、无并发控制、没有磁盘）。
 
 ## 快速上手
 
@@ -275,10 +276,51 @@ cd hosts/web && npm run test:p5               # G3/G4/G5：真实 headless Chrom
 > 相同的是**转译输入**）❌ 跨 Host 共享状态（P5 明确不共享）。
 > G6「state 独立」是结构性保证、不可能失败，**不计入 PASS**。
 
+### P6：Capability 从本地变成远程，Component 边界变了吗？（**已通过**）
+
+P5 封板后，P6 独立回答**另一个**问题：如果 Capability 的后端从**本地 Host 进程**
+变成**网络另一头的进程**，Wasm Component 的边界有没有发生变化？
+
+⚠️ 这**不是**「Component 支持远程」—— **组件、WIT、artifact 一个字都没改**，
+变的只有 `Arc<dyn CapabilityBackend>` 背后站的是谁。
+
+```bash
+node tools/remote-store-server.mjs --port 4318 &              # 远端服务（另一个操作系统进程）
+WASM=components/counter-store/target/wasm32-unknown-unknown/release/counter_store.wasm
+
+cargo run -p spark-host -- store $WASM 3                      # 本地对照
+# count: 3 / reloaded: 3 / stored: 1 条
+cargo run -p spark-host -- store $WASM 3 --remote http://127.0.0.1:4318
+# count: 3 / reloaded: 3 / remote stored: 1 条
+cargo run -p spark-host -- store $WASM 3 --remote http://127.0.0.1:4318   # 新 client 进程
+# count: 6 / reloaded: 6 / remote stored: 1 条   ← 起始的 3 在它启动之前就在另一个进程里
+```
+
+**同一个未经重新编译的 Domain Component artifact，在不修改 WIT 的前提下，可以由 Rust Host 的
+本地 Capability Backend 或远程 HTTP Capability Backend 承载**；两者 Domain 行为一致，
+而 **Capability state 的实际落点**从 Host 进程内存**移动到远端服务进程**。
+
+> **G4 主证据**：第三方（node）直接往远端写 `counter-store:count = 100`，
+> 一个从未写过它的客户端实例读到 `count: 100`。那个 `100` 不是客户端进程产生过的任何东西。
+> 换一个空的远端 → `count: 0`，说明 `base_url` 真的在选择状态域。
+
+> **G5 失败反事实**（顺序不可颠倒）：先看到 `count: 3` **仍成立**（Domain 行为不受网络影响），
+> 再看到 `reloaded: 0`（只有持久性变了）。网络失败是 `Unavailable`，**不是** `Denied`。
+
+> **核心边界**：「Remote 是纯 Host concern」成立的前提是 ——
+> **该 Host 能为同步 WIT 调用提供阻塞式 IO。** Rust Host 满足（`ureq` 阻塞，零 async、零新依赖）；
+> Web/jco 在当前同步 artifact + 同步 WIT 下**结构上不满足**。这条**是结论的一部分，不是脚注**。
+
+> **不许外推**：❌ Component 支持远程（变的是 Host）❌ Wasm Component Model 自带 RPC
+> （分布式落在 Host Capability Adapter）❌ 任意 Host 都支持 Remote Capability
+> ❌ 当前 Capability contract 已经足够完整（它**能表达**失败，但**区分不了**连不上与远端 500
+> —— 那是下一轮的契约实验）❌ durable = 跨进程 / 重启永久持久化（持久性由**后端**决定）
+> ❌ RPC / WebSocket / gRPC 已验证 ❌ Web / RN Remote Runtime 已验证。
+
 ### Agent 回路（决策者 → 沙箱工具调用）
 
 > **P5 · AI Agent · 未来层，已冻结**：这里的 P5 是**旧编号**下的 Agent 层，
-> 与上一节的 P5（同一 Domain Component 跨 Host）**不是同一件事**。
+> 与上文 P5（同一 Domain Component 跨 Host）**不是同一件事**。
 > Agent 只是另一种 Component Consumer，不在当前主线上迭代。见 [ROADMAP.md](ROADMAP.md)。
 
 

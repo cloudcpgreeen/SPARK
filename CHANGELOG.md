@@ -5,6 +5,241 @@
 
 ## [未发布]
 
+## P6 · Remote Capability
+
+> **核心问题**：如果 Capability 从**本地 Host** 变成 **Remote Capability**，
+> Wasm Component 的边界到底有没有发生变化？
+> **不是**「Component 支持远程」—— 组件、WIT、artifact **一个字都没改**；
+> 变的只有 `Arc<dyn CapabilityBackend>` 背后站的是谁。
+
+```
+P1    Component → Host                                  PASS / FROZEN
+P2    Component → Capability → Host                     PASS / FROZEN
+P3    Component → Capability ← Component                PASS / FROZEN
+P4    Provider chain → Host-owned State                 PASS / FROZEN  4997bba
+P5    SAME Component → DIFFERENT Hosts                  PASS / FROZEN  08dcadc
+P6    Local Capability → REMOTE Capability              PASS ← 本轮
+```
+
+### P6 与 P4-2 的区别（不写这一句，P6 会被读成 P4-2 的复述）
+
+P4-2 的对照臂是**两个字节不同的最终制品**（1-hop 与 2-hop 的 compose 产物）。
+P6 的对照臂**连制品都是同一份**：同一个 `counter-store.wasm`、同一个 Host 二进制、
+同一个 `ns`、同一个 click protocol，**唯一的架构变量是 Capability 后端的落点**
+（进程内 HashMap vs 网络另一头的进程）。
+
+### 设计期发现（只读预检，已经改掉了原设计）
+
+**① 阻塞 HTTP 让 Remote Capability 在 Rust Host 上是 drop-in。**
+`ureq` 已在树内（`spark-host/Cargo.toml`），`deepseek.rs` 已有同步
+`ureq::post(...).timeout(...)` 的先例；`async|tokio|block_on|call_async` 在
+`spark-host/` **零命中**。⇒ **WIT 不需要变，组件不需要重编译。**
+
+**② 代价落在「该 Host 的 IO 模型能不能阻塞」—— 这是 P6 结论的边界，不是脚注。**
+jco 1.29.0 生成的 `counter-store.js` 里字面写着
+`"non async exports cannot synchronously call async functions"`，且走的是 sync 分支。
+JSPI 机制存在，但要生效必须 async WIT 或 `asyncImports` —— 两条都会改契约，
+且 JSPI 目前只有 Chromium 支持。
+⇒ **「Remote 是纯 Host concern」成立的前提是：该 Host 能为同步 WIT 调用提供阻塞式 IO。**
+
+**③ 契约里的 `unavailable` 至今从未被任何 Host 产生过。**
+grep 全仓：`Unavailable` 只出现在生成的绑定与 `delegating-store` 的 pass-through 里；
+Host 侧此前只构造过 `Denied`。⇒ 网络失败**天然落进 `unavailable`**，
+不需要扩契约就能表达失败。
+
+**④ `denied` 不能挪用。** P2 把它冻结成**宿主侧只读模式**（`Backend::read_only()`）。
+网络失败若落进 `denied`，等于**静默重定义了一个已冻结的 variant**。
+
+**⑤ 沙箱的 epoch 预算原本是 per-Store 而不是 per-call（本轮必须修）。**
+tick = 10ms，`set_epoch_deadline(2)` 只在 `Store::new` 时设一次。本地调用是微秒级所以
+从未触发；远程臂每次会多出约 5 次**阻塞** HTTP，超时的表现是 `store trap:` 但退出码仍是
+`SUCCESS` —— **证据会被静默污染**。
+**这是被网络路径暴露出来的既有隐患，不是 P6 造出来的。**
+修复**只落在** `domain_store::click_times`（每次 `call_*` 前重设）。
+`domain.rs::click_times` 与 `compose.rs::click_times_selfcontained` 形状相同但纯本地、
+从未触发，**刻意未同步修改** —— 那是独立债务，不扩大爆炸半径。
+
+**⑥ `len()` 是「独立观测」的落点。** P4-1/P4-2 的 `stored: N 条` 就是它，
+且明确写为**独立于组件**的观测。远端臂需要等价的远端侧观测 ⇒ `/stats`。
+
+### 证据
+
+#### G0 — Artifact 与 WIT 冻结
+
+```
+OK: counter_store.wasm sha256 = 85691b8e50549e0608c893ef91836fb3f5056fa380e1e34236a9a93c33e7e584
+wit/capability.wit sha256     = 4c590b1ac655ab2b6b93e81eaf02deda041a2bfc8172f71e34eca7bbdad3707a
+git status --porcelain -- wit components spark-host/wit-store build-ui.sh hosts \
+    Cargo.toml spark-host/Cargo.toml spark-host/src/lib.rs \
+    spark-host/tests/{domain_store,delegating,delegation_chain}.rs   →  0 行
+```
+
+**本轮用 git zero-diff 而不是重新派生的 digest**：原计划的
+「28 files / `bd434a2e…`」是一个当时未记录 `find` 参数的派生值，现在无法重新构造。
+`git diff -- wit components = 0` 直接回答「本轮有没有修改」，比复现不出来的 digest 可靠。
+**不为了恢复那个旧 digest 再开实验。**
+
+#### G1 — Component 没有访问网络的能力
+
+三条，缺一条 P6 就退化成「我们写了个 HTTP 客户端」：
+
+```
+grep -rniE 'wasi|WasiCtx|wasmtime_wasi' spark-host/src spark-host/Cargo.toml   → 0 命中
+wasm-tools component wit counter_store.wasm
+    world root { import spark:capability/storage@0.1.0; export spark:store/counter-store@0.1.0; }
+grep -rniE 'http|socket|tcp|ureq|reqwest|fetch' components/counter-store/src   → 0 命中
+```
+
+沙箱零 import / 无 WASI ⇒ 组件**物理上不可能**发网络请求。
+这不是约定，是**能力缺失**。
+
+#### G2 — Local 对照
+
+```
+① store <wasm> 3                    → count: 3 / reloaded: 3 / stored: 1 条
+② store <wasm> 3   （新进程再跑）    → count: 3 / reloaded: 3 / stored: 1 条
+```
+
+两个**不同进程**输出相同 ⇒ 进程内 HashMap 随进程消失，本地状态不跨进程。这是 ④ 的对照。
+
+#### G3 — Remote 反事实
+
+```
+③ store <wasm> 3 --remote A        → count: 3 / reloaded: 3 / remote stored: 1 条
+④ store <wasm> 3 --remote A（新 client 进程）
+                                   → count: 6 / reloaded: 6 / remote stored: 1 条
+⑤ store <wasm> 0 --remote A        → count: 6 / reloaded: 6 / remote stored: 1 条
+```
+
+④ 的起点 3 是它在**启动之前**就存在于另一个进程里的。
+
+#### G4 — 状态真的在远端（**主证据**）
+
+```
+⑥ 第三方（node）直写 server A：counter-store:count = 100     → HTTP 200 {}
+   store <wasm> 0 --remote A       → count: 100 / reloaded: 100 / remote stored: 1 条
+⑦ store <wasm> 0 --remote B（空）  → count: 0 / reloaded: 0 / remote stored: 0 条
+   回到 A                          → count: 100
+```
+
+**`100` 不是客户端进程产生过的任何东西** —— 它只可能来自远端。
+所以主证据是 ⑥，不是 `/stats`（后者由**客户端**调用，只是佐证）。
+⑦ 进一步证明 `base_url` 真的在选择状态域，不是被忽略的装饰参数。
+
+#### G5 — 失败反事实（**顺序不可颠倒**）
+
+```
+⑧ store <wasm> 3 --remote http://127.0.0.1:4399（无人监听）
+   → count: 3 / reloaded: 0 / remote stored: 不可达: … Connection refused (os error 61)
+⑨ store <wasm> 3 --remote C（--fail-set，每次 set 回 500）
+   → count: 3 / reloaded: 0 / remote stored: 0 条
+```
+
+1. **先** `count: 3` 仍成立 —— in-instance 的 Domain 行为是本地自增，不受网络影响。
+2. **再** `reloaded: 0` —— 只有持久性变了。
+
+第二步若先发生，证明的会是 *capability failure propagation*，不是想证的分离。
+
+变体断言直接打在 `RemoteBackend` 上、**不经组件**（组件吞掉 `Err`，错误值从组件侧不可观测
+—— P2 的精确说法是 *set failure is observable through a subsequent fresh instance*）：
+
+```
+remote_failure_is_unavailable_not_denied
+  连不上        → Unavailable（set 与 get 都断言）
+  远端 5xx      → Unavailable（且消息指明状态码）
+  --fail-set 下 get 仍正常回 None  ← 证明这不是「整个后端坏了」
+```
+
+**硬判据：网络失败不得是 `Denied`。** 本轮没有污染 P2 已冻结的 variant。
+
+#### G6 — sync/async impedance matching 的落点（**设计发现，不计入 PASS**）
+
+- **Rust Host**：impedance 由 **Host 函数内部的阻塞**吸收 —— `ureq` 在 wasmtime 的
+  调用线程上阻塞，返回后照常 lowering。**零 async、零新依赖。**
+- **Web/jco Host**：在当前同步 artifact + 同步 WIT 下**结构上不可行**（发现 ②）。
+
+**这一条没有可跑的判据**，它是「记录一个位置」——写进记录，**不包装成实验发现**。
+
+#### G7 — 没有把 Remote 变成 Component Model 的新层
+
+`wit/` 与 `components/` 零 diff、文件清单不变；
+`spark:capability/storage@0.1.0` 文本逐字不变；未新增 WIT package / world。
+⇒ **分布式落在 Host Capability Adapter，不在 Component Model。**
+
+### 结论（P6 PASS）
+
+> 同一个未经重新编译的 Domain Component artifact，在不修改 WIT 的前提下，
+> 可以由 Rust Host 的**本地** Capability Backend 或**远程 HTTP** Capability Backend 承载；
+> 两者的 Domain 行为保持一致，而 **Capability state 的实际落点**可以从
+> Host 进程内存**移动到远端服务进程**。
+
+> 本次证明**依赖 Rust Host 能够为同步 WIT 调用提供阻塞式 I/O**；
+> 它**不证明**当前同步 WIT artifact 可以在 Web/jco 等不能同步阻塞的 Host 上
+> 直接采用同样的 Remote Backend。
+
+结构：
+
+```
+        同一个冻结 artifact（未重新编译）
+                    │
+        ┌───────────┴───────────┐
+   Local Backend          Remote Backend
+   进程内 HashMap          HTTP → 另一个进程
+        │                       │
+        └───────────┬───────────┘
+             Domain 语义一致
+                    ↓
+        State ownership / persistence location
+            由 Capability Backend 决定
+```
+
+**明确不许推出**：
+
+- ❌ Component 支持远程 —— Component 什么都没变，**变的是 Host**。
+- ❌ Wasm Component Model 自带 RPC —— 分布式落在 Host Capability Adapter。
+- ❌ 任意 Host 都支持 Remote Capability —— **Rust Host 能，是因为它能阻塞**；
+  Web/jco 在当前同步 artifact + 同步 WIT 下结构上不能。
+- ❌ 当前 Capability contract 已经足够完整 —— 实测只证明它能**表达**失败，
+  没证明它能**区分**网络不可达与远端 5xx。
+- ❌ durable = 跨进程 / 重启永久持久化 —— P4 的冻结定义
+  （*survives replacement of the Component / Provider instance*）**不动**；
+  持久性由**后端**决定，不由 Component 决定。
+- ❌ RPC / WebSocket / gRPC 都已经验证 —— 本轮只验证了**一个 HTTP 后端**。
+- ❌ Web / RN Remote Runtime 已验证 —— 两者都**不在本轮范围内**。
+
+### 冻结为下一轮的问题（不是 P6 的结论）
+
+`store-error` 的 2 个 variant **能表达**本轮观察到的远端失败，
+但 `unavailable` **区分不了**「连不上」与「远端 500」。
+**要不要扩契约不在本轮决定** —— 那是一个独立的契约实验。
+
+### 新增 / 修改
+
+| 文件 | 内容 |
+| --- | --- |
+| `spark-host/src/domain_store.rs` | 改：`CapabilityBackend` trait + `RemoteBackend`（`ureq` 阻塞）+ **仅** `click_times` 的 per-call epoch |
+| `spark-host/src/main.rs` | 改：`store` 的标志解析改循环，新增 `--remote <url>`；`stored:` 失败时不 `unwrap` |
+| `spark-host/tests/remote_capability.rs` | 新增（3 个测试，测试内自起替身 HTTP 服务，不依赖 node） |
+| `tools/remote-store-server.mjs` | 新增：stand-in 远端服务（node `node:http`，零依赖，**是替身不是产品**） |
+
+**为什么是 trait 而不是 enum**：`click_times(..., backend.clone())` 的实参是
+`Arc<Backend>`，会自动 unsize coerce 到 `Arc<dyn CapabilityBackend>`
+⇒ `main.rs` 的既有路径与 3 个既有测试文件**零改动**。
+做成 enum 会逼着改 3 个既有测试文件 —— 没必要的污染。
+
+**改动范围之外（已核对零 diff）**：`wit/**`、`components/**`、
+`spark-host/wit-store/**`、`spark-host/src/lib.rs`、`build-ui.sh`、`hosts/**`、
+根与 `spark-host` 的 `Cargo.toml`（`ureq` / `serde_json` 已在树内）、
+`tests/{domain_store,delegating,delegation_chain}.rs`。
+**既有 46 个测试一字未改**；`cargo test --workspace` = **49 passed / 0 failed**。
+
+### P6 明确不做
+
+❌ Web / RN 的 Remote Runtime 验证 ❌ async WIT / `future<T>` ❌ JSPI
+❌ RPC / WebSocket / gRPC ❌ 真实数据库 / 对象存储 ❌ 鉴权 / 重试 / 一致性 / 离线队列
+❌ 跨 Host 共享状态 ❌ 改 `wit/capability.wit` ❌ 重编译任何 component
+❌ 顺手修 `domain.rs` / `compose.rs` 的同类 epoch 债务 ❌ 决定「契约要不要扩」
+
 ## P5 · Same Domain Component, Multiple Hosts
 
 > **核心问题**：同一个 Headless Domain Component，能否在不同 Host 上运行，

@@ -359,6 +359,124 @@ P1 已经证明过「同一份 artifact、两个 Host」，但 `button.wasm` 是
 另开一个很小的 *P5-CI / Web Verification Gate*，而不是偷偷塞进 P5。
 （P5 页面目前是 dev-only，不进 `vite.config.ts` 的 production 入口。）
 
+## P6 · Remote Capability（**已完成**）
+
+**命题**：如果 Capability 从**本地 Host** 变成 **Remote Capability**，
+Wasm Component 的边界到底有没有发生变化？
+
+**不是**「Component 支持远程」—— **组件、WIT、artifact 一个字都没改**，
+变的只有 `Arc<dyn CapabilityBackend>` 背后站的是谁。
+
+```
+P1    Component → Host                                  PASS / FROZEN
+P2    Component → Capability → Host                     PASS / FROZEN
+P3    Component → Capability ← Component                PASS / FROZEN
+P4    Provider chain → Host-owned State                 PASS / FROZEN  4997bba
+P5    SAME Component → DIFFERENT Hosts                  PASS / FROZEN  08dcadc
+P6    Local Capability → REMOTE Capability              PASS ← 本轮
+```
+
+### ⚠️ P6 与 P4-2 的区别
+
+P4-2 的对照臂是**两个字节不同的最终制品**；P6 的对照臂**连制品都是同一份** ——
+同一个 `counter-store.wasm`、同一个 Host 二进制、同一个 `ns`、同一个 click protocol，
+**唯一的架构变量是 Capability 后端的落点**（进程内 HashMap vs 网络另一头的进程）。
+
+### 核心边界（**这是结论的一部分，不是脚注**）
+
+> 「Remote 是纯 Host concern」成立的前提是：**该 Host 能为同步 WIT 调用提供阻塞式 IO。**
+
+Rust Host 满足（`ureq` 在 wasmtime 的调用线程上阻塞，同步返回后照常 lowering；
+**零 async、零新依赖**）。Web/jco 在当前**同步 artifact + 同步 WIT**下**结构上不满足**：
+jco 1.29.0 生成的代码里字面写着
+`"non async exports cannot synchronously call async functions"`，且走的是 sync 分支。
+要让它可行必须 async WIT 或 `asyncImports`（两条都会改契约），且 JSPI 目前只有 Chromium 支持。
+
+### 设计期发现（改掉了原设计）
+
+1. **`ureq` 已在树内，wasmtime 全程同步** —— `async|tokio|block_on|call_async` 在
+   `spark-host/` 零命中 ⇒ **WIT 不变、组件不重编译**即可接上远端后端。
+2. **契约里的 `unavailable` 至今从未被任何 Host 产生过** —— 网络失败天然落进它，
+   **不需要扩契约就能表达失败**。
+3. **`denied` 不能挪用** —— P2 已冻结为**宿主侧只读模式**，拿它接网络失败等于静默重定义。
+4. **沙箱的 epoch 预算原本是 per-Store 而非 per-call** —— 本地调用微秒级所以从未触发，
+   但一次阻塞的远端调用就可能吃掉预算，而超时表现为 `store trap:` + **`SUCCESS` 退出码**，
+   证据会被静默污染。**这是被网络路径暴露出来的既有隐患，不是 P6 造出来的。**
+   修复**只落在** `domain_store::click_times`；`domain.rs` / `compose.rs` 的同类债务
+   **刻意未同步修改**（独立债务，不扩大爆炸半径）。
+5. **`len()` 是「独立于组件」观测的落点** —— 远端臂需要等价的远端侧观测 ⇒ `/stats`。
+
+| # | gate | 观测 | 状态 |
+| --- | --- | --- | --- |
+| G0 | artifact / WIT 冻结 | `counter_store.wasm` sha 未变、`capability.wit` 未变、关键路径 git zero-diff | ✅ |
+| G1 | Component **没有访问网络的能力** | 零 WASI + world imports **恰好** `spark:capability/storage@0.1.0` + 源码零 transport 字样 | ✅ |
+| G2 | Local 对照（两个不同进程） | `count: 3` / `reloaded: 3` / `stored: 1 条`，两次相同 | ✅ |
+| G3 | Remote 反事实 | ③ `3` → ④ **新 client 进程** `count: 6` → ⑤ 零点击直读 `6` | ✅ |
+| G4 | **状态真的在远端（主证据）** | 第三方写入 `counter-store:count = 100` → 客户端读到 `count: 100`；换空 server B → `0` | ✅ |
+| G5 | 失败反事实 | **先** `count: 3` 成立，**再** `reloaded: 0`；错误是 `Unavailable` **不是** `Denied` | ✅ |
+| G6 | sync/async impedance 的落点 | **设计发现，无可跑判据** ⇒ **不计入 PASS** | — |
+| G7 | 没有新增 Component Model 层 | `wit/` 与 `components/` 零 diff、文件清单不变 | ✅ |
+
+### 结论
+
+> 同一个未经重新编译的 Domain Component artifact，在不修改 WIT 的前提下，
+> 可以由 Rust Host 的**本地** Capability Backend 或**远程 HTTP** Capability Backend 承载；
+> 两者的 Domain 行为保持一致，而 **Capability state 的实际落点**可以从
+> Host 进程内存**移动到远端服务进程**。
+
+> 本次证明**依赖 Rust Host 能够为同步 WIT 调用提供阻塞式 I/O**；
+> 它**不证明**当前同步 WIT artifact 可以在 Web/jco 等不能同步阻塞的 Host 上
+> 直接采用同样的 Remote Backend。
+
+```
+        同一个冻结 artifact（未重新编译）
+                    │
+        ┌───────────┴───────────┐
+   Local Backend          Remote Backend
+   进程内 HashMap          HTTP → 另一个进程
+        │                       │
+        └───────────┬───────────┘
+             Domain 语义一致
+                    ↓
+        State ownership / persistence location
+            由 Capability Backend 决定
+```
+
+**G4 为什么是主证据**：那个 `100` **不是客户端进程产生过的任何东西** ——
+它只可能来自远端。`/stats` 由客户端调用，只是佐证。
+
+### 证据含义的边界（不许滑坡）
+
+- **G5 的顺序不可颠倒**：必须**先** `count: 3` 成立，**再** `reloaded: 0`。
+  若第一步不成立，证明的是 *capability failure propagation*，**不是**想证的分离。
+- **失败臂的断言不经组件**：组件吞掉 `Err`，错误值从组件侧不可观测
+  （P2 的精确说法是 *set failure is observable through a subsequent fresh instance*）。
+  变体断言直接打在 `RemoteBackend` 上，**没有为观测往契约里加探针**。
+- **G6 没有可跑判据**，它是「记录一个位置」——写进记录，**不包装成实验发现**。
+- **不许由此宣布「契约已经足够」**：实测只证明它能**表达**失败，
+  没证明它能**区分**网络不可达与远端 5xx。
+
+**不许外推**：
+
+- ❌ 「Component 支持远程」—— Component 什么都没变，**变的是 Host**。
+- ❌ 「Wasm Component Model 自带 RPC」—— 分布式落在 **Host Capability Adapter**。
+- ❌ 「任意 Host 都支持 Remote Capability」—— **Rust Host 能，是因为它能阻塞**。
+- ❌ 「当前 Capability contract 已经足够完整」。
+- ❌ 「durable = 跨进程 / 重启永久持久化」—— P4 的冻结定义**不动**，
+  持久性由**后端**决定，不由 Component 决定。
+- ❌ 「RPC / WebSocket / gRPC 都已经验证」—— 本轮只验证了**一个 HTTP 后端**。
+- ❌ 「Web / RN Remote Runtime 已验证」—— 两者都不在本轮范围内。
+
+### 冻结为下一轮的问题
+
+`store-error` 的 2 个 variant **能表达**远端失败，但 `unavailable`
+**区分不了**「连不上」与「远端 500」。**要不要扩契约不在本轮决定** —— 那是独立的契约实验。
+
+**P6 明确不做**：❌ Web / RN 的 Remote Runtime 验证 ❌ async WIT / `future<T>` ❌ JSPI
+❌ RPC / WebSocket / gRPC ❌ 真实数据库 / 对象存储 ❌ 鉴权 / 重试 / 一致性
+❌ 跨 Host 共享状态 ❌ 改 `wit/capability.wit` ❌ 重编译任何 component
+❌ 顺手修 `domain.rs` / `compose.rs` 的同类 epoch 债务
+
 ## 后续 · 跨端 Domain Components
 
 把 Button 扩成真正成体系的域组件；验证组件间组合与前后端一致的行为。
