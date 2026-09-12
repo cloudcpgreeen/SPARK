@@ -11,3 +11,7 @@ plugins/
 hosts/web/src/generated/
 hosts/*/node_modules/
 hosts/*/dist/
+
+# P3 组合产物：由 build-ui.sh 把 mem-store.wasm 组合进 counter-store.wasm 派生而来，
+# 是 derived artifact 而非 Component 源，不入库。
+dist/

@@ -102,6 +102,26 @@ world store-world {
 }
 ```
 
+### 1.5 `spark:mem-store@0.1.0`（`wit/mem-store.wit`）— P3
+
+**实现**能力的 Provider 组件：零 import，导出 `storage`。
+
+```
+package spark:mem-store@0.1.0;
+
+world provider-world {
+  export spark:capability/storage@0.1.0;
+}
+```
+
+`storage` 在这里**不是重新定义**的：接口身份必须与 `spark:capability@0.1.0` 完全相同，
+否则 `wasm-tools compose` 接不上（identity 不匹配会直接组合失败）。
+`spark:capability` 的版本**没有 bump** —— bump 会让 P2 的 `counter-store.wasm` 变成孤儿。
+
+组件侧 `spark:capability/storage` 是**按值导出**的接口（不是 resource），
+所以 `Guest` 方法是静态的、拿不到 `&self`；`components/mem-store` 把状态挂在
+实例的 `thread_local!` map 上。**这就是 ③ 的作用域来源**，不是契约规定。
+
 - **key 是裸 key。** `ns:key` 前缀是 **Host 的实例策略**，**不是** `spark:capability/storage` 的语义。
 - **`future<T>` 在当前工具链不可用**（实测）：`wasm-tools validate` 报
   `future requires the component model async feature`，jco 报 canonical ABI 参数不匹配。
@@ -158,6 +178,29 @@ Store 走同一个 `new_store()`（内存 16 MiB + epoch 预算），因此跨�
 （组件侧未调用的 import 会被 tree-shake，宿主侧不会）。
 **JS 侧约定不同**：`jco` 生成的 d.ts 是 `set(key: string, value: string): void` —— 成功正常返回，
 **出错要 `throw` 出 WIT 的 error 值**（`throw { tag: 'denied', val: '…' }`）。写成 `{tag:'err',…}` 会被静默当成功。
+
+### 2.5 组合（`spark_host::compose`）— P3
+
+| 项 | 语义 |
+| --- | --- |
+| `compose::storage_roundtrip(host, provider_wasm, key, value) -> Result<Option<String>>` | ① 实例化 **Provider 组件**（`provider-world`），`set` 后 `get` —— 组件自己实现了能力 |
+| `compose::click_times_selfcontained(host, wasm_path, clicks) -> Result<u32>` | ②③ 用**空 `Linker::new()`** 实例化 `store-world`：不提供任何 capability 实现。能跑通 ⇒ import 已被组合消掉 |
+
+`click_times_selfcontained(…, 0, …)` = 组合产物的「全新实例读到什么」，**必然是 0**。
+`storage_roundtrip` 是 set-then-get，所以它**观察不到** `Ok(None)`（缺 key）—— 要观察缺 key 得另说。
+
+**bindgen 目录**：`spark-host/wit-provider/`（`mem-store.wit` + `deps/capability/capability.wit` 两个 symlink），
+`bindgen!({ path: "wit-provider", world: "provider-world" })`。`path` 相对 **CARGO_MANIFEST_DIR**。
+
+**`composed.wasm` 的生成**（`build-ui.sh`）：
+
+```
+wasm-tools compose <counter_store.wasm> -d <mem-store.wasm> --no-imports -o dist/composed.wasm
+```
+
+两个坑：① `wasm-tools compose` 已废弃（提示改用 `wac`，但本机装不上）；
+② 它要求**定义组件的文件名是 kebab-case**，而 cargo-component 产出的是 `mem_store.wasm` ——
+所以脚本先 `cp` 成 `dist/mem-store.wasm` 再喂给它。文件名不参与接口身份。
 
 ### 2.1 Agent 回路（`spark_host::agent`）
 
@@ -224,6 +267,8 @@ spark-host pipe <input> <name>...       # 流水线：输出串联，fail-fast �
 spark-host list                         # 发现并列出 plugins/ 下的组件
 spark-host domain <button.wasm> <n>     # 域组件：沙箱内点 n 次，打印 count
 spark-host store <counter-store.wasm> <n> [--deny]  # 用能力的域组件：count + reloaded
+spark-host provide <mem-store.wasm> <key> <value>   # Provider 组件：自己实现了 capability
+spark-host composed <composed.wasm> <n>             # 组合产物：跑在**空 Linker** 上
 spark-host agent "<prompt>" [--model flash|pro]  # Agent 回路（P5 未来层，已冻结）
 ```
 
@@ -237,6 +282,20 @@ stored: 1 条    # 后端实际落盘条目数
 
 `--deny` 用只读后端（`set` → `Err(Denied)`）：`count: 3` / `reloaded: 0`。
 两次实例化用的是**同一份未被重新编译的 wasm**。
+
+`provide` / `composed` 的输出（P3）：
+
+```
+set: k = v      # provide：往 Provider Component 里写
+got: v          #         同一个 Provider 实例读回来
+
+count: 3        # composed：组合产物在空 Linker 上点 3 次
+reloaded: 0     #            全新实例读到的值 —— 对照 `store` 的 3
+```
+
+`composed` 用的是 `Linker::new()`（**空**）：只要组件还 import 任何东西就会失败。
+所以 `reloaded: 0` 不是「写失败」，而是**本次 Provider 把状态放在自己实例里**的后果 ——
+与 `store --deny` 的 `reloaded: 0` 是两件不同的事，别看混。
 
 | 输出态 | 格式 | 退出码 |
 | --- | --- | --- |

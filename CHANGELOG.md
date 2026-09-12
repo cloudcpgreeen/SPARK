@@ -5,6 +5,79 @@
 
 ## [未发布]
 
+## P3 · Capability 的实现也可以是一个 Component
+
+> 命题：一个 Capability 的**实现者**，能不能本身也是一个 Component？
+> P1 = `Component → 多个 Host`；P2 = `Component → Capability Contract → 多个 Host Implementation`；
+> P3 = `Component → Capability Contract ← Component`。
+
+### 新增
+
+- **`wit/mem-store.wit`**（`spark:mem-store@0.1.0` / `provider-world`）：`export spark:capability/storage@0.1.0`，**零 import**。
+  **没有重定义 `storage`** —— 接口身份必须与 `spark:capability@0.1.0` 逐字相同，否则组合接不上。
+  也**没有 bump `spark:capability`**：那会让 P2 的 `counter-store.wasm` 变成孤儿。
+- **`components/mem-store`**：Provider 组件，`RefCell` → 实际是实例级 `thread_local!` map
+  （`storage` 是**按值导出**的接口，`Guest` 方法是静态的、拿不到 `&self`）。
+- **`spark-host/src/compose.rs`**：`bindgen!({ path: "wit-provider", world: "provider-world" })` +
+  `storage_roundtrip`（①）与 `click_times_selfcontained`（②③，**空 Linker**）。
+- **CLI**：`provide <mem-store.wasm> <key> <value>`、`composed <composed.wasm> <n>`。
+- **`build-ui.sh`**：构建 `mem-store` → 打印组合**前后** `counter-store.wasm` 的 sha256 并**断言相等** →
+  `wasm-tools compose --no-imports -o dist/composed.wasm` → `jco transpile`（**这一行没有 `--map`**，
+  它的缺席就是证据：组合产物没有 import 要注入）。
+- **`hosts/web/src/App.tsx`** 第三个区块（P2 区块未动）：三个区块并排 = 三种状态归属。
+
+### 验收（P3 交付判据）
+
+| # | 结果 | 判据 |
+| --- | --- | --- |
+| ① | Provider Component 能实现能力 | `mem_store.wasm` 零 import（`wasm-tools component wit`）；`provide <wasm> k v` → `got: v` |
+| ② | 组合消除了 import | `composed.wasm` 在**空 Linker** 上 `composed <wasm> 3` → `count: 3` |
+| ② 对照 | 这条路真的是空的 | 裸 `counter-store.wasm` 在**同一个空 Linker** 上 trap：`imports instance spark:capability/storage@0.1.0, but a matching implementation was not found in the linker` |
+| ③ | 代价是作用域 | 同一份 `composed.wasm` → `reloaded: 0`，对照 P2 的 `3` |
+| ④ | 两个源制品不动 | `counter-store.wasm` sha256 仍 `85691b8e…`；P2 的 `domain_store.rs` / `Backend` 零 diff |
+| ⑤ | 零 import 由工具强制 | `wasm-tools compose --no-imports` 通过，不是我肉眼观察的 |
+| ⑥ | P2 完好 | 42 个测试全绿（38 原 + 4 新增），`cargo fmt --check` 与 `cargo clippy --workspace --all-targets` 干净 |
+| ⑦ | Web | 真实 Chrome：P1 刷新 → `0`、P2 刷新 → `3`、P3 刷新 → **`0`**；转译无 `--map` |
+
+**三件事分开成立，不打包成一个结论**：① 组件能实现能力／② 组合消掉了 import／③ 代价是作用域。
+② 必须有**对照**（裸消费者在同一空 Linker 上失败），否则「这条路是空的」没被证明。
+
+**③ 的措辞必须是 implementation consequence，不是 Component Model law**：
+*在本次实现中*，Provider 的状态位于 Provider Component instance 内，因此组合后的能力状态具有
+**instance scope**。换一个委派给外部存储的 Provider，作用域会不同 ——
+「能力的作用域怎么保住」是**后续**的问题，P3 只记录不选路。
+
+**`composed.wasm` 是 derived artifact**（两个 Component 的组合产物，与 jco 转译产物同类），
+**不是**第三个 Component 源。「P2 的 `counter-store.wasm` 零重新编译」与「P1 的 `button.wasm` 字节不变」
+是两条不同的证明，不许混。
+
+### 变更
+
+- `.gitignore` 追加 `dist/`（组合产物是构建产物，不是源）。
+- `CONTRACT.md` §2/§5、`ROADMAP.md`、`README.md`、`REFERENCE.md` §1.5/§2.5/§6、`MANIFESTO.md` §2.1/§2.2/§7、
+  `DEVELOPMENT.md` 的构建流程登记 P3。
+
+### 测试
+
+- 新增 `spark-host/tests/compose.rs`（4 个）：Provider 回环 / 组合产物跑通空 Linker /
+  **对照组裸消费者必须失败** / 作用域是实例级。
+- 合计 42 个测试全绿（38 原测试未改 + 4 新增），fmt 与 clippy 干净。
+
+### P3 明确不做（如实记录）
+
+- **不做运行期动态组合**：wasmtime 47 的 `LinkerInstance` 只有 `func_wrap` / `func_new` / `module` / `resource`，
+  **没有**「把另一个组件实例的导出接进本组件导入」的一等 API；`wac` 需联网安装，本机不可用。
+  因此 `wasm-tools compose`（已废弃，提示改用 `wac`）是唯一可行的静态组合路径。
+- 不回答「能力的作用域怎么保住」（委派）；不做权限模型、不做真实 DB / 网络存储、不做 Registry。
+- 不碰 `wit/capability.wit`、`wit/ui.wit`、`components/{button,counter-store}`、P2 的宿主代码、
+  `plugin-world`、6 个插件、沙箱参数、Agent 代码。
+
+### 已知粗糙处
+
+- `wasm-tools compose` 要求**定义组件的文件名是 kebab-case**，而 cargo-component 产出 `mem_store.wasm`，
+  所以 `build-ui.sh` 先 `cp` 成 `dist/mem-store.wasm` 再组合。文件名不参与接口身份。
+- `storage_roundtrip` 是 set-then-get，所以它**观察不到** `Ok(None)`（缺 key）。
+
 ## P2 · Capability Contract Spike
 
 > 命题：一个 Component **import** 的 Capability，能不能由不同 Host 提供不同实现，

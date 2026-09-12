@@ -1,0 +1,10 @@
+package spark:mem-store@0.1.0;
+
+/// 一个 **Provider Component**：它自己**实现** `spark:capability/storage@0.1.0`，
+/// 键值放在自己的实例内存里。
+///
+/// 它不 import 任何东西 —— 这正是 P3 要证的东西：Capability 的实现者也可以是组件。
+/// 它不 bump `spark:capability`：接口身份不变，P2 的 `counter-store.wasm` 才不会是孤儿。
+world provider-world {
+  export spark:capability/storage@0.1.0;
+}

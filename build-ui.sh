@@ -19,6 +19,7 @@ build_component() {
 
 BUTTON="$(build_component button button)"
 STORE="$(build_component counter-store counter_store)"
+PROVIDER="$(build_component mem-store mem_store)"
 
 echo
 echo "==> 契约自检（世界 + import/export）"
@@ -28,7 +29,26 @@ npx --no-install jco wit "$STORE" | grep -E "^world|  (world|export|import)" || 
 echo
 echo "==> 制品 sha256（P2 判据：换 Host 实现时 STORE 的值不变）"
 echo "button.wasm        $(shasum -a 256 "$BUTTON" | cut -d' ' -f1)"
-echo "counter-store.wasm $(shasum -a 256 "$STORE" | cut -d' ' -f1)"
+SHA_BEFORE="$(shasum -a 256 "$STORE" | cut -d' ' -f1)"
+echo "counter-store.wasm $SHA_BEFORE"
+
+echo
+echo "==> P3 组合：Provider Component 实现 capability，import 被组合消掉"
+# wasm-tools compose 要求**定义组件的文件名**是 kebab-case；cargo-component 产出的
+# mem_store.wasm 不符合，所以复制一份再喂给它。文件名不参与接口身份，只影响这一步。
+mkdir -p dist
+cp "$PROVIDER" dist/mem-store.wasm
+wasm-tools compose "$STORE" -d dist/mem-store.wasm --no-imports -o dist/composed.wasm
+echo "mem-store.wasm     $(shasum -a 256 "$PROVIDER" | cut -d' ' -f1)"
+echo "composed.wasm      $(shasum -a 256 dist/composed.wasm | cut -d' ' -f1)"
+
+# composed.wasm 是**派生制品**，不是第三个 Component 源。组合不该动到任何一个源制品。
+SHA_AFTER="$(shasum -a 256 "$STORE" | cut -d' ' -f1)"
+if [ "$SHA_BEFORE" != "$SHA_AFTER" ]; then
+  echo "FAIL: 组合动了 counter-store.wasm（$SHA_BEFORE → $SHA_AFTER）" >&2
+  exit 1
+fi
+echo "OK: 组合前后 counter-store.wasm 的 sha256 不变"
 
 echo
 echo "==> jco transpile → hosts/web/src/generated/<name>（Host 适配产物，非第二个 Component）"
@@ -39,11 +59,17 @@ npx --no-install jco transpile "$BUTTON" -o hosts/web/src/generated/button --nam
 npx --no-install jco transpile "$STORE" -o hosts/web/src/generated/store --name counter-store \
   --map 'spark:capability/storage=./storage.js'
 cp hosts/web/src/capability/storage.js hosts/web/src/generated/store/storage.js
+# 这一行**没有 --map** —— 它没有 import 需要注入，这正是 P3 的证据。
+npx --no-install jco transpile dist/composed.wasm -o hosts/web/src/generated/composed --name composed
 
 echo
 echo "组件产物: $BUTTON"
 echo "          $STORE"
+echo "Provider: $PROVIDER"
+echo "组合产物: $PWD/dist/composed.wasm（derived，非 Component 源）"
 echo "Rust 后端: cargo run -p spark-host -- domain $BUTTON 3"
 echo "           cargo run -p spark-host -- store $STORE 3        # 健康存储 → reloaded: 3"
 echo "           cargo run -p spark-host -- store $STORE 3 --deny # 拒绝写入 → reloaded: 0"
+echo "           cargo run -p spark-host -- provide $PROVIDER k v # → got: v"
+echo "           cargo run -p spark-host -- composed dist/composed.wasm 3 # → count: 3 / reloaded: 0"
 echo "Web 宿主 : cd hosts/web && npm install && npm run dev"

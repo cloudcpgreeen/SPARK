@@ -26,10 +26,12 @@ fn main() -> ExitCode {
         [cmd, prompt, rest @ ..] if cmd == "agent" => agent(&host, prompt, rest),
         [cmd, wasm, n] if cmd == "domain" => domain(&host, wasm, n),
         [cmd, wasm, n, rest @ ..] if cmd == "store" => store(&host, wasm, n, rest),
+        [cmd, wasm, key, value] if cmd == "provide" => provide(&host, wasm, key, value),
+        [cmd, wasm, n] if cmd == "composed" => composed(&host, wasm, n),
         [wasm, input] => run_path(&host, wasm, input),
         _ => {
             eprintln!(
-                "usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list | domain <button.wasm> <n> | store <counter-store.wasm> <n> [--deny] | agent <prompt> [--model flash|pro] (agent 属 P5 未来层)"
+                "usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list | domain <button.wasm> <n> | store <counter-store.wasm> <n> [--deny] | provide <mem-store.wasm> <key> <value> | composed <composed.wasm> <n> | agent <prompt> [--model flash|pro] (agent 属 P5 未来层)"
             );
             ExitCode::from(2)
         }
@@ -196,6 +198,53 @@ fn store(host: &Host, wasm: &str, n: &str, rest: &[String]) -> ExitCode {
         }
         Err(e) => {
             eprintln!("store trap: {e}");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+/// ① Provider 命令：`spark-host provide <mem-store.wasm> <key> <value>`。
+///
+/// 单独实例化一个**实现** capability 的组件，`set` 之后 `get` 读回来 —— 打印读到的值。
+fn provide(host: &Host, wasm: &str, key: &str, value: &str) -> ExitCode {
+    match spark_host::compose::storage_roundtrip(host, wasm, key, value) {
+        Ok(got) => {
+            println!("set: {key} = {value}");
+            println!("got: {}", got.as_deref().unwrap_or("<none>"));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("provider trap: {e}");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+/// ② 组合命令：`spark-host composed <composed.wasm> <n>`。
+///
+/// 走**空 Linker**（不提供任何 capability 实现）：能跑通就说明 import 已被组合消掉。
+/// 与 `store` 同法打印 `count` / `reloaded`，但 `reloaded` 必然是 0 —— 见 compose.rs 的说明。
+fn composed(host: &Host, wasm: &str, n: &str) -> ExitCode {
+    let Ok(clicks) = n.parse::<u32>() else {
+        eprintln!("clicks 必须是 u32: {n}");
+        return ExitCode::from(2);
+    };
+    match spark_host::compose::click_times_selfcontained(host, wasm, clicks) {
+        Ok(count) => {
+            println!("count: {count}");
+            match spark_host::compose::click_times_selfcontained(host, wasm, 0) {
+                Ok(reloaded) => {
+                    println!("reloaded: {reloaded}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("composed trap: {e}");
+                    ExitCode::SUCCESS
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("composed trap: {e}");
             ExitCode::SUCCESS
         }
     }

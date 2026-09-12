@@ -24,6 +24,7 @@ Host 可以完全不同。各 Host 各有实例与状态（后端点 3 次 → 3
 | `plugin-world` | `spark:runtime@0.4.0` | **零 import 的不可信插件沙箱**（安全边界） |
 | `domain-world` | `spark:ui@0.1.0` | **前后端统一的域组件**，目前仍零 import |
 | `store-world` | `spark:store@0.1.0` | **显式import `spark:capability/storage`** 的域组件（P2 起） |
+| `provider-world` | `spark:mem-store@0.1.0` | **实现** `spark:capability/storage` 的组件，零 import（P3 起） |
 
 ---
 
@@ -101,12 +102,50 @@ import `spark:capability/storage`，状态写穿到 capability。
   **该不该 async 应由实验结果决定，不是先入为主的 API 设计。**
 - 不做 capability 的权限/授权模型；后端实现就是进程内 map（换 DB 只动 `domain_store.rs` 一个文件——这本身就是结论）。
 
-## P3 · 跨端 Domain Components
+## P3 · Capability 的实现也可以是一个 Component（**已完成**）
+
+**命题再往下推一层**：P2 = `Component → Capability Contract → 多个 Host Implementation`；
+P3 = `Component → Capability Contract ← Component` —— **实现者本身也是组件**。
+
+```
+counter-store.wasm  (Consumer, P2 冻结, SHA 85691b8e…)
+        +                                          wasm-tools compose
+mem-store.wasm      (Provider, 导出 storage，零 import)  ────────────────>  composed.wasm
+                                                                            （零 import）
+```
+
+| # | 结果 | 判据 | 状态 |
+| --- | --- | --- | --- |
+| ① | Provider Component 能实现能力 | `mem_store.wasm` 零 import；`provide <wasm> k v` → `got: v` | ✅ |
+| ② | 组合消除了 import | `composed.wasm` 在**空 Linker** 上 `composed <wasm> 3` → `count: 3` | ✅ |
+| ② 对照 | 这条路真的是空的 | 裸 `counter-store.wasm` 在**同一个空 Linker** 上必须失败 | ✅ |
+| ③ | 代价是作用域 | 同一份 `composed.wasm` → `reloaded: 0`（对照 P2 的 `3`） | ✅ |
+| ④ | 两个源制品不动 | `counter-store.wasm` sha256 不变；P2 宿主代码零 diff | ✅ |
+| ⑤ | 零 import 由工具强制 | `wasm-tools compose --no-imports`，不是肉眼观察 | ✅ |
+| ⑥ | P2 完好 | 42 个测试全绿（38 原 + 4 新增）、fmt / clippy 干净 | ✅ |
+| ⑦ | Web | 真实 Chrome：P1 → 0、P2 → 3、P3 → 0；转译**无 `--map`** | ✅ |
+
+**关键区分**：`composed.wasm` 是 **derived artifact**（两个 Component 的组合产物，
+与 jco 转译产物同类），**不是**第三个 Component 源。这与「重新编译 `counter-store`」是两回事。
+
+**③ 的措辞**：Provider 把状态放在自己的实例内存里，所以组合后的能力状态是 instance-scoped。
+这是**本次实现的后果**，**不是** Component Model 的普遍定律。
+
+### P3 明确不做 / 留给后续
+
+- **不回答「能力的作用域怎么保住」**（委派：Provider 自己 import 一个外部存储）——
+  只记录，不选路。
+- **不做运行期动态组合**：wasmtime 47 的 `LinkerInstance` 只有 `func_wrap` / `func_new` /
+  `module` / `resource`，**没有**「把另一个组件实例的导出接进本组件导入」的一等 API；
+  `wac` 需联网安装，本机不可用。**如实记录为限制，不绕路。**
+- 不做 capability 的权限模型、不做真实 DB / 网络存储。
+
+**P2 留下的待决**：Capability Contract 要不要 async。见上文 P2 末尾 —— 仍然挂着。
+
+## 后续 · 跨端 Domain Components
 
 把 Button 扩成真正成体系的域组件；验证组件间组合与前后端一致的行为。
 若要自动化 Web 验收，此时引入 Playwright。
-
-**P2 留下的第一个待决**：Capability Contract 要不要 async。见上文 P2 末尾。
 
 ## P4 · Component Registry
 

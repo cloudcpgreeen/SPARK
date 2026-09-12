@@ -16,6 +16,8 @@ WIT package 使用 `spark:<module>@<version>` 形式：
 - `spark:ui@0.1.0` — 跨端域组件契约（`wit/ui.wit`）：`button` 接口 + `domain-world` 世界，零 import。
 - `spark:capability@0.1.0` — **能力契约**（`wit/capability.wit`）：`storage` 接口（`get`/`set`，错误 `store-error` 区分 `unavailable`/`denied`）。**这是边界，不是实现**——实现由各 Host 提供。
 - `spark:store@0.1.0` — 用了能力的域组件（`wit/store.wit`）：`counter-store` 接口 + `store-world` 世界，`import spark:capability/storage@0.1.0`。
+- `spark:mem-store@0.1.0` — **实现**能力的 Provider 组件（`wit/mem-store.wit`）：`provider-world` 世界，`export spark:capability/storage@0.1.0`，**零 import**。
+  它**不重新定义** `storage`：接口身份必须与 `spark:capability@0.1.0` 完全相同，否则 `wasm-tools compose` 接不上。
 - 未来按领域拆模块：`spark:order@x.y.z`、`spark:identity@x.y.z` 等，一个模块一个 package。
 
 ## 3. 契约优先工作流（idea 落地第一步）
@@ -53,3 +55,12 @@ WIT package 遵循语义化版本（semver）：
   换实现只改 Host，**组件不重新编译**——这是 P2 的核心判据。
 - **Capability 的 key 是裸 key。** 命名空间前缀（`ns:key`）属于 **Host 的实例策略**，
   **不是** `spark:capability/storage` 的语义。契约只说「按 key 读写」。
+- **Capability 的实现者也可以是一个组件（P3）。** 一个导出 `spark:capability/storage@0.1.0`
+  的零 import 组件（Provider），可以由 `wasm-tools compose` **静态组合**进消费者：
+  import 被消掉，组合产物能跑在**空 Linker** 上。这与「重新编译消费者」是两回事——
+  消费者的 artifact（sha256）完全不变。
+- **组合产物是 derived artifact，不是新的 Component 源。** `dist/composed.wasm` 与 jco 的
+  转译产物同类：它由两个 Component 派生，不占「一个 package 一个组件」的账。
+- **组合会把能力的作用域一起搬走。** 本次 Provider 把状态放在自己的实例内存里，
+  所以组合后的能力状态是 **instance-scoped**。这是**该实现的后果**，
+  **不是** Component Model 的普遍定律——换一个委派给外部存储的 Provider，作用域会不同。

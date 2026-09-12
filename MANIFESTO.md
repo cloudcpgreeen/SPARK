@@ -41,6 +41,10 @@ Capability **定义**那个需求的形状，Host **提供**实现。所以：
 **契约属于双方，实现只属于 Host。** 因此 `ns:key` 这类隔离策略是 **Host 的实例策略**，
 **不是** Capability 契约的语义 —— 契约只说「按 key 读写」。
 
+P3 把「实现」再拆一层：**实现者可以是 Host，也可以是另一个 Component**。
+一个导出 `spark:capability/storage@0.1.0` 的零 import 组件被静态组合进消费者之后，
+import 被消掉、消费者仍不需要重新编译 —— 但能力的**作用域**跟着实现一起搬到了组件里。
+
 **黄金不变量**：多端**不要求代码相同** —— 要求的是**契约相同、Component 相同、Domain 行为相同**；
 Host 可以完全不同。各 Host 各有实例与状态，共享的是契约与行为，**不是状态**。
 
@@ -51,6 +55,7 @@ Host 可以完全不同。各 Host 各有实例与状态，共享的是契约与
 | `plugin-world` | `spark:runtime@0.4.0` | **零 import 的不可信插件沙箱** —— 安全边界，戒律 3.3 在此生效 |
 | `domain-world` | `spark:ui@0.1.0` | **前后端统一的域组件** —— 同一个 `.wasm` 跑在 Rust 后端与 Web 前端（RN 见 `hosts/rn/README.md`）。**仍零 import** |
 | `store-world` | `spark:store@0.1.0` | **显式 import 能力的域组件**（P2 起）—— 能力由各 Host 实现，组件不变 |
+| `provider-world` | `spark:mem-store@0.1.0` | **实现能力的组件**（P3 起）—— 导出 `spark:capability/storage@0.1.0`，零 import。实现者也是组件 |
 
 一份契约、一个组件，可以同时是前端和后端的业务组件：**组件不知道自己在哪一端**。
 UI 是宿主的事，状态与行为是组件的事。
@@ -123,11 +128,20 @@ SPARK 对不可信插件的立场：**默认不可信，一切攻击在沙箱内
 - **跨端域组件（P1 已闭环）**：`spark:ui@0.1.0` / `domain-world` —— headless Button 计数器（`constructor → click → count`，零 import、无任何 UI 概念）。**同一份 `button.wasm`** 跑通两端：Rust 后端（wasmtime）点 3 次 → `count: 3`；Web 浏览器（jco → ESM → React）现场点击 `0 → 3`、刷新回 `0`（状态住在组件里，React 不持有 count）。构建一次：`./build-ui.sh`。RN 见 `hosts/rn/README.md`（编译门 PASS，运行时未验证）。
 - **Capability Contract（P2 已闭环）**：`spark:capability@0.1.0` / `storage`（`get`/`set`，`Ok(Some)` 有值 / `Ok(None)` 没有这个 key / `Err` 能力失败）+ `spark:store@0.1.0` / `store-world`（`counter-store.wasm`，import 能力、写穿到它）。**同一份未被重新编译的 `counter-store.wasm`** 换 Host 实现：Rust 后端（进程内 map）→ `reloaded: 3`；Web 浏览器（localStorage）→ 真点击 3 次、**刷新后仍是 3**（同页 P1 刷新回 0）；只读后端 / 打断 localStorage 写入 → `reloaded: 0`。判据是**换实现不改组件**，不是「调用成功」。RN 侧只到**注入点**：`hosts/rn/capability/storage.js` 存在，但 runtime 仍 unverified —— **不写「RN Capability implemented」**。
 - Agent 回路（**P5 · 未来层，已冻结**）：`agent` 命令两条路——默认 `AlgorithmPredictor` 本地算法预测（离线、无 Key）；`--model flash|pro` 走 `DeepSeekPredictor` harness（OpenAI 兼容 Chat Completions，模型 `deepseek-v4-flash`/`deepseek-v4-pro`，Key 只走 `DEEPSEEK_API_KEY` 环境变量、只进 `Authorization` 头）。跨插件编排按「然后/再」后的意图词二次调用（倒序→reverse、转大写→upper）。代码保留、测试保持通过，但**不在当前决策路径上迭代**：Agent 只是另一种 Component Consumer。
+- **Capability 的实现者也是 Component（P3 已闭环）**：`spark:mem-store@0.1.0` / `provider-world`
+  —— 一个**导出** `spark:capability/storage@0.1.0` 的零 import 组件（`mem_store.wasm`）。
+  由 `wasm-tools compose --no-imports` 静态组合进 P2 的 `counter-store.wasm`，得到派生的
+  `composed.wasm`：import 被消掉，跑在**空 Linker** 上（P1 那条路径）。**P2 的两个源制品 sha256 不变。**
+  Rust 后端 `provide <wasm> k v` → `got: v`、`composed <wasm> 3` → `count: 3 / reloaded: 0`；
+  Web 浏览器三个区块并排：P1 刷新 → 0、P2 刷新 → 3、P3 刷新 → 0。
+  **`composed.wasm` 是 derived artifact，不是第三个 Component 源**；`reloaded: 0` 是
+  **本次 Provider 把状态放在自己实例里**的后果，不是 Component Model 的普遍定律 ——
+  「能力的作用域怎么保住」（委派给外部存储）留给后续，P3 只记录不选路。
 - 真实业务插件族：`idcard`（身份证校验）、`luhn`（银行卡校验）、`rmb`（人民币金额转大写，财会大写）。
 
 ### 路标
-- **P2 · Capability Import**：给 `spark:ui` 加 `import storage`，验证「组件不碰存储本身，只说存这个键」；存储实现由各 Host 提供。
-- **P3 · 跨端 Domain Components** / **P4 · Component Registry** / **P5 · AI Agent**（冻结中）。
+- **后续 · 跨端 Domain Components**：把 Button 扩成成体系的域组件，验证组件间组合与前后端一致的行为。
+- **P4 · Component Registry** / **P5 · AI Agent**（冻结中）。
 - 由真实业务插件继续驱动：更丰富错误语义（`plugin-error` 加字段，契约 `0.4.0 → 0.5.0`）、更多跨插件编排场景。
 - 详见 [ROADMAP.md](ROADMAP.md)。
 

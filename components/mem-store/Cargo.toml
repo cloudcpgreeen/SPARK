@@ -1,0 +1,24 @@
+[package]
+name = "mem-store"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreeen/SPARK"
+description = "SPARK P3：一个**实现** spark:capability/storage 的 Provider Component（键值放在自己的实例内存里，零 import）"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen-rt = "0.41"
+
+[package.metadata.component]
+package = "spark:mem-store"
+
+# cargo-component 不自动读 deps/：跨 package 依赖必须显式声明。
+# 这里依赖的是**接口身份**（要 export 它），不是要 import 它。
+[package.metadata.component.target.dependencies]
+"spark:capability" = { path = "deps/capability" }
+
+# 独立于根 workspace：仅由 `cargo component build` 构建，根 `cargo build`/`cargo test` 不触碰。
+[workspace]

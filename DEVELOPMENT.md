@@ -12,7 +12,10 @@ spark/
 ├── spark-core/       # 无 HTTP 领域库：NAME / contract_version
 ├── spark-host/       # wasmtime 宿主：沙箱加载 plugin-world 组件并调用
 ├── spark-plugin/     # 插件组件（独立 workspace，仅 cargo component build）
-├── wit/              # WIT 契约：core.wit、runtime.wit（见 CONTRACT.md）
+├── wit/              # WIT 契约：core.wit、runtime.wit、ui.wit、capability.wit、store.wit、mem-store.wit
+├── components/       # 跨端域组件（各自独立 workspace）：button、counter-store、mem-store
+├── hosts/            # 非 Rust 宿主：web（Vite + React）、rn（spike）
+├── dist/             # 构建产物（组合出来的 composed.wasm），不入库
 └── CONTRACT.md       # 约定一 · 契约（WIT）
    DEVELOPMENT.md     # 约定二 · 开发（本文件）
    DEPLOYMENT.md      # 约定三 · 交付
@@ -31,8 +34,17 @@ cargo run -p spark-host -- spark-plugin/target/wasm32-unknown-unknown/release/sp
 cargo run -p spark-host -- pipe <input> upper reverse   # 流水线：输出串联，任一步失败即 fail-fast
 cargo run -p spark-host -- agent "把 hello 转大写"       # Agent 回路：本地算法预测 + 沙箱工具调用（无网络）
 cargo run -p spark-host -- agent "把 hello 转大写" --model flash  # DeepSeek harness（需 DEEPSEEK_API_KEY，Key 只走环境变量）
+
+./build-ui.sh               # 跨端域组件：逐组件一次 Component build + 契约自检 + sha256
+                            # + P3 组合（wasm-tools compose --no-imports）+ jco 转译
+cargo run -p spark-host -- domain <button.wasm> 3        # P1：count: 3
+cargo run -p spark-host -- store <counter-store.wasm> 3  # P2：count: 3 / reloaded: 3
+cargo run -p spark-host -- provide <mem_store.wasm> k v  # P3：got: v（Provider 组件实现能力）
+cargo run -p spark-host -- composed dist/composed.wasm 3 # P3：count: 3 / reloaded: 0（空 Linker）
 ```
 
+- **P3 的构建顺序不可省**：`./build-ui.sh` 里组合那一步会**断言** `counter-store.wasm` 组合前后 sha256 相同。
+  `composed.wasm` 是 derived artifact，改动它**不该**、也**不会**动到两个源制品。
 - 插件组件固定 `--target wasm32-unknown-unknown`（`.cargo/config.toml` 已钉死），产物零 WASI import，纯粹导出 `spark:runtime/plugin`。
 - `spark-host` 集成测试覆盖 happy path / 声明式失败（`result` 的 err，`code` 可断言）/ trap 捕获 / trap 后隔离 / 多插件可插拔 / 攻击者切断（`tests/isolation.rs`）、插件自注册与按 name 解析运行（`tests/registry.rs`）、共享 `Host` 多线程并发调用且 trap 不串（`tests/concurrency.rs`）、流水线输出串联与 fail-fast 定位（`tests/pipe.rs`）、Agent 回路（决策 → 沙箱调用 → 结果喂回，`tests/agent.rs`）、金额转大写（`tests/rmb.rs`）、DeepSeek harness 离线单测（消息组装 / tools 映射 / 响应解析，`src/deepseek.rs`）；组件未构建时自动跳过（先执行上面的 `cargo component build`）。
 - 沙箱资源有界：CPU 走 epoch 时间预算、内存走 StoreLimits（见 [SECURITY.md](SECURITY.md)）。

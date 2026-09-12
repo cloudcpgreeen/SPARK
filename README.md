@@ -15,9 +15,18 @@ cargo run -p spark-host -- store components/counter-store/target/wasm32-unknown-
 # count: 3        ← 本实例数到 3
 # reloaded: 3     ← 新实例从 capability 里读到 3
 
+# P3：capability 的实现本身也是一个 Component —— 组合进消费者，import 被消掉
+cargo run -p spark-host -- provide components/mem-store/target/wasm32-unknown-unknown/release/mem_store.wasm k v
+# got: v            ← Provider Component 自己实现了 storage（零 import）
+
+cargo run -p spark-host -- composed dist/composed.wasm 3
+# count: 3          ← 组合产物跑在**空 Linker** 上（它已经不 import 任何东西）
+# reloaded: 0       ← 能力的介质住在 Provider 实例里，作用域跟着搬了过去
+
 cd hosts/web && npm install && npm run dev
 # 浏览器里：P1 区块点 3 次 → 3，刷新 → 0（状态在组件实例里）
 #           P2 区块点 3 次 → 3，刷新 → 3（状态经 capability 落在 localStorage 里）
+#           P3 区块点 3 次 → 3，刷新 → 0（capability 由组件实现，状态在 Provider 实例里）
 ```
 
 Component（共享的状态与行为）/ Host（平台适配与 UI，**也是 Capability 的实现者**）/
@@ -70,10 +79,11 @@ Capability（外部能力的**契约**）三分，以及两套信任模型，见
 
 - Cargo workspace：`spark-core`（无 HTTP 领域库）、`spark-host`（wasmtime 宿主）。
 - `spark-plugin`：插件组件（独立 workspace），产出零依赖 WASM 组件，导出 `spark:runtime/plugin`。
-- `wit/`：`core.wit`（`spark:core@0.1.0` 骨架）、`runtime.wit`（`spark:runtime@0.4.0`，`plugin-world` 契约：`transform` 返回 `result<string, plugin-error>`、`info` 带元数据，另有 Agent 调用面 `schema`/`invoke`）、`ui.wit`（`spark:ui@0.1.0`，`domain-world` 跨端域组件契约）、`capability.wit`（`spark:capability@0.1.0`，**能力契约** `storage`）、`store.wit`（`spark:store@0.1.0`，`store-world`：import 能力的域组件）。
-- `components/`：跨端域组件（独立 workspace）。`button` 是零 import 的 headless 计数器，**同一份 `.wasm`** 跑 Rust 后端与 Web 前端；`counter-store` import `spark:capability/storage`，**同一份 `.wasm`** 换 Host 实现不重新编译（RN 运行时未验证，见 `hosts/rn/README.md`）。
+- `wit/`：`core.wit`（`spark:core@0.1.0` 骨架）、`runtime.wit`（`spark:runtime@0.4.0`，`plugin-world` 契约：`transform` 返回 `result<string, plugin-error>`、`info` 带元数据，另有 Agent 调用面 `schema`/`invoke`）、`ui.wit`（`spark:ui@0.1.0`，`domain-world` 跨端域组件契约）、`capability.wit`（`spark:capability@0.1.0`，**能力契约** `storage`）、`store.wit`（`spark:store@0.1.0`，`store-world`：import 能力的域组件）、`mem-store.wit`（`spark:mem-store@0.1.0`，`provider-world`：**实现**能力的 Provider 组件，零 import）。
+- `components/`：跨端域组件（独立 workspace）。`button` 是零 import 的 headless 计数器，**同一份 `.wasm`** 跑 Rust 后端与 Web 前端；`counter-store` import `spark:capability/storage`，**同一份 `.wasm`** 换 Host 实现不重新编译；`mem-store` **导出** `spark:capability/storage`，零 import（RN 运行时未验证，见 `hosts/rn/README.md`）。
 - `hosts/`：非 Rust 宿主。`web/`（Vite + React，经 jco 加载同一份 `.wasm`，并在 `src/capability/` 里给出 capability 的 Web 实现）、`rn/`（spike 与结论 + capability 注入点）。
-- `build-ui.sh`：逐组件一次 Component build → 契约自检 → 打印 sha256 → jco 转译为 Web 可 import 的 JS。
+- `dist/composed.wasm`：**derived artifact** —— `build-ui.sh` 用 `wasm-tools compose --no-imports` 把 `mem-store.wasm` 组合进 `counter-store.wasm` 的产物。不是 Component 源，不入库。
+- `build-ui.sh`：逐组件一次 Component build → 契约自检 → 打印 sha256 → **组合并校验源制品不变** → jco 转译为 Web 可 import 的 JS。
 
 ## 快速上手
 
@@ -124,6 +134,36 @@ cd hosts/web && npm run dev                        # 浏览器：点 3 次 → �
 > ⚠️ **RN 不能写成「capability 已实现」。** `hosts/rn/capability/storage.js` 只是**注入点**，
 > RN runtime 与 P1 一致仍是 **unverified**。原因（同步契约 vs 异步 `AsyncStorage`）见
 > `hosts/rn/README.md` 第六节，**P2 只记录不回答**。
+
+### Capability 的实现也可以是一个 Component（P3）
+
+`mem-store.wasm` **导出** `spark:capability/storage@0.1.0`（零 import），
+由 `wasm-tools compose` 静态组合进 `counter-store.wasm`：
+
+```bash
+./build-ui.sh                        # 组合发生在这一步（--no-imports），并打印前后 sha256
+WASM=dist/composed.wasm
+
+cargo run -p spark-host -- provide components/mem-store/target/wasm32-unknown-unknown/release/mem_store.wasm k v
+cargo run -p spark-host -- composed $WASM 3       # count: 3 / reloaded: 0
+cd hosts/web && npm run dev                        # 第三个区块：刷新 → 0
+```
+
+**三件事分开成立，不打包**：
+
+1. Provider Component 能实现这个能力（`provide` → `got: v`）；
+2. 组合把 import 消掉了 —— `composed.wasm` 跑在**空 Linker** 上，而裸 `counter-store.wasm`
+   在**同一个空 Linker** 上必须失败（这条对照才是证据）；
+3. 代价是**作用域**：Provider 把状态放在自己的实例内存里，所以 `reloaded: 0`（P2 是 `3`）。
+   这是**本次实现的后果**，**不是** Component Model 的普遍定律。
+
+**`composed.wasm` 是 derived artifact**（两个 Component 的组合产物，与 jco 转译产物同类），
+**不是**第三个 Component 源 —— **P2 的两个源制品 sha256 不变**，P2 的宿主代码零 diff。
+「零 import」由 `wasm-tools compose --no-imports` 强制断言，不是肉眼观察。
+
+> 运行期动态组合（`wac plug` 的等价物）**本阶段不做**：wasmtime 47 的 `LinkerInstance`
+> 没有「把另一个组件实例的导出接进本组件导入」的一等 API，`wac` 需联网安装。
+> 「能力的作用域怎么保住」（委派给外部存储）留给后续，P3 只记录。
 
 ### Agent 回路（决策者 → 沙箱工具调用）
 
