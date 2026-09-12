@@ -61,6 +61,56 @@ world domain-world {
 - 宿主绑定：Rust 侧 `spark-host/src/domain.rs` 的第二个 `bindgen!`；JS 侧 `jco transpile`。
 - `resource counter` → jco 生成 `class Counter { constructor(); click(): void; count(): number }` —— 自然映射，无需 Host adapter。
 
+### 1.3 能力契约与用能力的域组件（P2）
+
+**能力契约**（`wit/capability.wit`）—— 只声明能力，不含实现：
+
+```
+package spark:capability@0.1.0;
+
+interface storage {
+  variant store-error {
+    unavailable(string),
+    denied(string),
+  }
+  get: func(key: string) -> result<option<string>, store-error>;
+  set: func(key: string, value: string) -> result<_, store-error>;
+}
+```
+
+`Ok(Some(v))` 有值 / `Ok(None)` 没有这个 key / `Err` 能力本身失败 —— **「缺失」与「失败」必须可区分**。
+`get` 的错误形态刻意选了 `result<option<string>, _>` 而不是 `option<result<..>>`：前者「缺失」是正常业务状态，
+后者会把「失败」压成「没有」。
+
+**用能力的域组件**（`wit/store.wit`）—— 刻意独立成 package，**不 bump `spark:ui@0.1.0`**
+（那会让 P1 的 `button.wasm` 导出变成孤儿）：
+
+```
+package spark:store@0.1.0;
+
+interface counter-store {
+  resource counter {
+    constructor();
+    click: func();
+    count: func() -> u32;
+  }
+}
+
+world store-world {
+  import spark:capability/storage@0.1.0;
+  export counter-store;
+}
+```
+
+- **key 是裸 key。** `ns:key` 前缀是 **Host 的实例策略**，**不是** `spark:capability/storage` 的语义。
+- **`future<T>` 在当前工具链不可用**（实测）：`wasm-tools validate` 报
+  `future requires the component model async feature`，jco 报 canonical ABI 参数不匹配。
+  这是 wit-bindgen-rt 0.41 与工具链的 ABI 生成缺口，**不是 flag 问题**。
+- 跨 package 解析脚手架（两处，各自一份 symlink，`deps/` 放在 `wit/` **外面**以免重复定义 package）：
+  - 组件侧：`components/counter-store/deps/capability/`，由 `Cargo.toml` 的
+    `[package.metadata.component.target.dependencies]` 引用（cargo-component **不自动读 `deps/`**）。
+  - 宿主侧：`spark-host/wit-store/`（`store.wit` + `deps/capability/`），`bindgen!` 的 `path` 指向**目录**。
+
 ## 2. 宿主公开 API（spark-host）
 
 类型（bindgen 生成，路径 `crate::exports::spark::runtime::plugin::{PluginInfo, PluginError}`；生成类型**不实现 `PartialEq`**）。
@@ -87,6 +137,27 @@ Store 走同一个 `new_store()`（内存 16 MiB + epoch 预算），因此跨�
 | `domain::click_times(host: &Host, wasm_path: &str, clicks: u32) -> Result<u32>` | 新建 Store + 空 Linker + instantiate → 构造 `counter` → 调 `clicks` 次 `click()` → 返回 `count()` |
 
 每次调用都是新 Store + 新实例：**状态住在组件实例里，宿主不持有**，实例互不污染。
+
+### 2.3 用能力的域组件（`spark_host::domain_store`）
+
+`bindgen!({ path: "wit-store", world: "store-world" })`（**目录**，含 `deps/capability/`）。
+`Backend` 是**宿主侧的 capability 实现**，换介质只改这一个文件。
+
+| 签名 | 语义 |
+| --- | --- |
+| `Backend::new() -> Arc<Backend>` | 后台实现：进程内 `Mutex<HashMap>` |
+| `Backend::read_only() -> Arc<Backend>` | `set` 返回 `Err(Denied)`，`get` 正常 —— 用来观察错误路径 |
+| `Backend::len() / is_empty()` | 实际落盘条目数 |
+| `domain_store::click_times(host, wasm_path, clicks, ns, backend) -> Result<u32>` | 新建 Store（同一套 `sandbox_limits()` + epoch 预算）+ `Linker::new` + `StoreWorld::add_to_linker::<_, HasSelf<_>>` + instantiate → 构造 `counter` → 点 `clicks` 次 → 返回 `count()` |
+
+`click_times(…, 0, …)` = **「一个全新实例读到了什么」** —— P2 观察 capability 是否生效的方式
+（`reloaded` 与 `count` 的差就是证据）。`ns` 决定 key 前缀，是宿主策略。
+
+**宿主侧 trait 签名与组件侧不同**：wasmtime 生成的是未包一层 `wasmtime::Result` 的
+`fn set(&mut self, key: String, value: String) -> Result<(), StoreError>`，且**要求实现全部函数**
+（组件侧未调用的 import 会被 tree-shake，宿主侧不会）。
+**JS 侧约定不同**：`jco` 生成的 d.ts 是 `set(key: string, value: string): void` —— 成功正常返回，
+**出错要 `throw` 出 WIT 的 error 值**（`throw { tag: 'denied', val: '…' }`）。写成 `{tag:'err',…}` 会被静默当成功。
 
 ### 2.1 Agent 回路（`spark_host::agent`）
 
@@ -152,8 +223,20 @@ spark-host run <name> <input>           # 按 info().name 运行（从 plugins/ 
 spark-host pipe <input> <name>...       # 流水线：输出串联，fail-fast 定位
 spark-host list                         # 发现并列出 plugins/ 下的组件
 spark-host domain <button.wasm> <n>     # 域组件：沙箱内点 n 次，打印 count
+spark-host store <counter-store.wasm> <n> [--deny]  # 用能力的域组件：count + reloaded
 spark-host agent "<prompt>" [--model flash|pro]  # Agent 回路（P5 未来层，已冻结）
 ```
+
+`store` 的输出：
+
+```
+count: 3        # 本实例点 n 次后自己看到的值
+reloaded: 3     # 全新实例从 capability 读到的值 —— 能力是否生效的证据
+stored: 1 条    # 后端实际落盘条目数
+```
+
+`--deny` 用只读后端（`set` → `Err(Denied)`）：`count: 3` / `reloaded: 0`。
+两次实例化用的是**同一份未被重新编译的 wasm**。
 
 | 输出态 | 格式 | 退出码 |
 | --- | --- | --- |

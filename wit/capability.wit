@@ -1,0 +1,18 @@
+package spark:capability@0.1.0;
+
+/// 键值存储能力契约。组件只声明 import，实现由各 Host 提供。
+///
+/// 注意：key 是**裸 key**，不含任何命名空间前缀。隔离策略（谁和谁不共享数据）
+/// 是 Host 的实例策略，不是本契约的语义——本契约只约定「按 key 读写」。
+interface storage {
+  variant store-error {
+    unavailable(string),
+    denied(string),
+  }
+
+  /// `Ok(Some(v))` 有值 / `Ok(None)` 没有这个 key / `Err` 能力本身失败。
+  /// 「缺失」与「失败」必须可区分：前者是正常业务状态，后者不是。
+  get: func(key: string) -> result<option<string>, store-error>;
+
+  set: func(key: string, value: string) -> result<_, store-error>;
+}

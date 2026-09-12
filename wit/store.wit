@@ -1,0 +1,19 @@
+package spark:store@0.1.0;
+
+/// 写入型计数器：headless 域组件，状态由 capability 持久化。
+///
+/// 这是 P2 Capability Contract Spike 的实验对象：它 import `spark:capability/storage`，
+/// 但**不关心**这个能力由谁实现——Rust 后端进程内 map、Web 的 localStorage、
+/// RN 的注入点，都是同一个 `counter-store.wasm`。
+interface counter-store {
+  resource counter {
+    constructor();
+    click: func();
+    count: func() -> u32;
+  }
+}
+
+world store-world {
+  import spark:capability/storage@0.1.0;
+  export counter-store;
+}

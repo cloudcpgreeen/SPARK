@@ -29,8 +29,17 @@ SPARK 是**契约即 WIT 的组件运行时**：领域逻辑做成满足 WIT 契
 | 概念 | 是什么 |
 | --- | --- |
 | **Component** | **共享的业务状态与行为**（headless，不含任何 UI 概念）—— 如 `button.wasm` |
-| **Host** | **平台适配与 UI / 运行环境** —— Rust+wasmtime / Web(Vite+React) / RN(Hermes) |
-| **Capability** | **外部能力**（storage / remote API），P2 才引入；P1 中没有 |
+| **Host** | **平台适配与 UI / 运行环境**，**也是 Capability 的实现者** —— Rust+wasmtime / Web(Vite+React) / RN(Hermes) |
+| **Capability** | **外部能力的契约**（storage / remote API）—— 如 `spark:capability/storage@0.1.0` |
+
+**三者的关系不是三个并列的盒子**：Component **声明**它需要什么能力（`import`），
+Capability **定义**那个需求的形状，Host **提供**实现。所以：
+
+> 换一个 Host 的 Capability 实现，**组件不需要重新编译**。
+
+这是 P2 撞到的命题，也是「Capability 属于 Host 还是属于 Component」这个问题的答案：
+**契约属于双方，实现只属于 Host。** 因此 `ns:key` 这类隔离策略是 **Host 的实例策略**，
+**不是** Capability 契约的语义 —— 契约只说「按 key 读写」。
 
 **黄金不变量**：多端**不要求代码相同** —— 要求的是**契约相同、Component 相同、Domain 行为相同**；
 Host 可以完全不同。各 Host 各有实例与状态，共享的是契约与行为，**不是状态**。
@@ -40,7 +49,8 @@ Host 可以完全不同。各 Host 各有实例与状态，共享的是契约与
 | world | 契约 | 信任模型 |
 | --- | --- | --- |
 | `plugin-world` | `spark:runtime@0.4.0` | **零 import 的不可信插件沙箱** —— 安全边界，戒律 3.3 在此生效 |
-| `domain-world` | `spark:ui@0.1.0` | **前后端统一的域组件** —— 同一个 `.wasm` 跑在 Rust 后端与 Web 前端（RN 见 `hosts/rn/README.md`），能力显式引入（P2 起） |
+| `domain-world` | `spark:ui@0.1.0` | **前后端统一的域组件** —— 同一个 `.wasm` 跑在 Rust 后端与 Web 前端（RN 见 `hosts/rn/README.md`）。**仍零 import** |
+| `store-world` | `spark:store@0.1.0` | **显式 import 能力的域组件**（P2 起）—— 能力由各 Host 实现，组件不变 |
 
 一份契约、一个组件，可以同时是前端和后端的业务组件：**组件不知道自己在哪一端**。
 UI 是宿主的事，状态与行为是组件的事。
@@ -111,6 +121,7 @@ SPARK 对不可信插件的立场：**默认不可信，一切攻击在沙箱内
 - 并发模型：`Host` 长存（共享 Engine + 组件编译缓存 + 单 epoch bump 线程），每次调用新建独立 Store，可多线程并发，隔离不变
 - 安全加固：epoch CPU 上限 + StoreLimits 内存上限，`attacker` 的 CPU/内存炸弹被切断
 - **跨端域组件（P1 已闭环）**：`spark:ui@0.1.0` / `domain-world` —— headless Button 计数器（`constructor → click → count`，零 import、无任何 UI 概念）。**同一份 `button.wasm`** 跑通两端：Rust 后端（wasmtime）点 3 次 → `count: 3`；Web 浏览器（jco → ESM → React）现场点击 `0 → 3`、刷新回 `0`（状态住在组件里，React 不持有 count）。构建一次：`./build-ui.sh`。RN 见 `hosts/rn/README.md`（编译门 PASS，运行时未验证）。
+- **Capability Contract（P2 已闭环）**：`spark:capability@0.1.0` / `storage`（`get`/`set`，`Ok(Some)` 有值 / `Ok(None)` 没有这个 key / `Err` 能力失败）+ `spark:store@0.1.0` / `store-world`（`counter-store.wasm`，import 能力、写穿到它）。**同一份未被重新编译的 `counter-store.wasm`** 换 Host 实现：Rust 后端（进程内 map）→ `reloaded: 3`；Web 浏览器（localStorage）→ 真点击 3 次、**刷新后仍是 3**（同页 P1 刷新回 0）；只读后端 / 打断 localStorage 写入 → `reloaded: 0`。判据是**换实现不改组件**，不是「调用成功」。RN 侧只到**注入点**：`hosts/rn/capability/storage.js` 存在，但 runtime 仍 unverified —— **不写「RN Capability implemented」**。
 - Agent 回路（**P5 · 未来层，已冻结**）：`agent` 命令两条路——默认 `AlgorithmPredictor` 本地算法预测（离线、无 Key）；`--model flash|pro` 走 `DeepSeekPredictor` harness（OpenAI 兼容 Chat Completions，模型 `deepseek-v4-flash`/`deepseek-v4-pro`，Key 只走 `DEEPSEEK_API_KEY` 环境变量、只进 `Authorization` 头）。跨插件编排按「然后/再」后的意图词二次调用（倒序→reverse、转大写→upper）。代码保留、测试保持通过，但**不在当前决策路径上迭代**：Agent 只是另一种 Component Consumer。
 - 真实业务插件族：`idcard`（身份证校验）、`luhn`（银行卡校验）、`rmb`（人民币金额转大写，财会大写）。
 

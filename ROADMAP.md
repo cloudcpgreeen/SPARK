@@ -10,8 +10,8 @@
 | 概念 | 是什么 | 例子 |
 | --- | --- | --- |
 | **Component** | **共享的业务状态与行为**（headless，不含任何 UI 概念） | `button.wasm`：`constructor → click → count` |
-| **Host** | **平台适配与 UI / 运行环境** | Rust + wasmtime；Web(Vite+React)；RN(Hermes) |
-| **Capability** | **外部能力**（storage / remote API 等），P2 才引入 | P1 中不存在 |
+| **Host** | **平台适配与 UI / 运行环境**，**也是 Capability 的实现者** | Rust + wasmtime；Web(Vite+React)；RN(Hermes) |
+| **Capability** | **外部能力**的**契约**（storage / remote API 等），实现由 Host 提供 | `spark:capability/storage@0.1.0`：`get` / `set` |
 
 **黄金不变量**：三端**不要求代码相同** —— 要求的是**契约相同、Component 相同、Domain 行为相同**；
 Host 可以完全不同。各 Host 各有实例与状态（后端点 3 次 → 3；Web 点 1 次 → 1），
@@ -22,7 +22,8 @@ Host 可以完全不同。各 Host 各有实例与状态（后端点 3 次 → 3
 | world | 契约 | 信任模型 |
 | --- | --- | --- |
 | `plugin-world` | `spark:runtime@0.4.0` | **零 import 的不可信插件沙箱**（安全边界） |
-| `domain-world` | `spark:ui@0.1.0` | **前后端统一的域组件**，能力显式引入（P2 起） |
+| `domain-world` | `spark:ui@0.1.0` | **前后端统一的域组件**，目前仍零 import |
+| `store-world` | `spark:store@0.1.0` | **显式import `spark:capability/storage`** 的域组件（P2 起） |
 
 ---
 
@@ -46,18 +47,66 @@ P1 明确不做：不 import 任何 capability、不做多组件、不给 Button
 
 ---
 
-## P2 · Capability Import
+## P2 · Capability Contract Spike（**已完成**）
 
-给 `spark:ui` 加 `import storage`（`get/set/remove`），验证「组件不碰存储本身，只说存这个键」，
-而存储实现由各 Host 提供：Rust = HashMap/Redis，Web = localStorage，RN = MMKV。
+**命题换了一层**：P1 = `Component → 多个 Host`；P2 = `Component → Capability Contract → 多个 Host Implementation`。
 
-已知待决：**`AsyncStorage` 是异步的，与同步 `storage` 接口不兼容** —— 需在 MMKV（同步）、
-写穿缓存、或把 WIT 改 async 之间做选择。这是 P2 的第一个决策点，不要拖到实现中途才发现。
+> 一个 Component **import** 的 Capability，能不能由不同 Host 提供不同实现，
+> 而 **Component 本身完全不改变**？
+
+**叫 Capability Contract Spike，不叫 Storage** —— 先定边界，再谈实现。
+
+**契约**（**没有**动 `spark:ui@0.1.0`，否则 P1 的 `button.wasm` 会变成孤儿）：
+
+```wit
+package spark:capability@0.1.0;
+interface storage {
+  variant store-error { unavailable(string), denied(string) }
+  get: func(key: string) -> result<option<string>, store-error>;
+  set: func(key: string, value: string) -> result<_, store-error>;
+}
+```
+
+`Ok(Some(v))` 有值 / `Ok(None)` 没有这个 key / `Err` 能力本身失败 —— 「缺失」与「失败」必须可区分。
+
+**实验对象**：`components/counter-store` → `counter-store.wasm`（`spark:store@0.1.0` / `store-world`），
+import `spark:capability/storage`，状态写穿到 capability。
+
+| # | 结果 | 判据 | 状态 |
+| --- | --- | --- | --- |
+| ① | 契约 | `spark:capability@0.1.0` 独立 package；`spark:ui@0.1.0` 零改动 | ✅ |
+| ② | 一份 artifact | `counter-store.wasm` 一次构建，sha256 `85691b8e…` | ✅ |
+| ③ | **Rust Backend PASS** | 同一 wasm + 后端进程内 map → 点 3 次 = 3，新实例 = 3 | ✅ |
+| ④ | **Web Browser PASS** | 同一 wasm + localStorage → 真实 Chrome 点击，**刷新后 count 存活** | ✅ |
+| ⑤ | 错误路径 | 同一 wasm + 只读后端 / 禁存储 → 新实例 = 0 | ✅ |
+| ⑥ | 换实现不改组件 | ③④⑤ 用的是**同一份未被重新编译的 wasm** | ✅ |
+| ⑦ | P1 完好 | 35 个原测试全绿；P1 的 WIT / 组件 / 宿主代码零 diff | ✅ |
+| ⑧ | RN | injection point exists / **runtime unverified** | ⚠️ |
+
+**⑤ 的精确措辞**：*set failure is observable through a subsequent fresh instance*。
+**不是**「错误处理已验证」—— 组件侧压根没处理 `Err` 分支。
+
+**两种「不变」是两件事，不许合并**：
+- P1：`button.wasm` **byte-for-byte 不变**（零 diff 证明）。
+- P2：`counter-store.wasm` **只构建一次**，换 Capability 实现时**不重新编译**（sha256 相同证明）。
+
+**`ns` 是 Host instance policy，不是契约语义。** 组件发裸 key（`"count"`），
+`ns:key` 前缀由 Host 在实例化时加上。
+
+### P2 明确不做 / 留给 P3
+
+- **不回答 `AsyncStorage` 的同步/异步问题。** 契约是同步的，`AsyncStorage` 是 Promise；
+  要么「内存 Map + 异步落盘」（冷启动 hydration 竞态），要么把契约改 async
+  （级联 wasmtime + wit-bindgen + jco + Metro，且 `future<T>` 在本工具链实测不可用）。
+  **该不该 async 应由实验结果决定，不是先入为主的 API 设计。**
+- 不做 capability 的权限/授权模型；后端实现就是进程内 map（换 DB 只动 `domain_store.rs` 一个文件——这本身就是结论）。
 
 ## P3 · 跨端 Domain Components
 
 把 Button 扩成真正成体系的域组件；验证组件间组合与前后端一致的行为。
 若要自动化 Web 验收，此时引入 Playwright。
+
+**P2 留下的第一个待决**：Capability Contract 要不要 async。见上文 P2 末尾。
 
 ## P4 · Component Registry
 

@@ -89,3 +89,41 @@ export { button010 as 'spark:ui/button@0.1.0', }
 P1 的核心证明是 ② Rust 后端 与 ③ Web 浏览器，两者都已 PASS。
 RN 只是第四个 Consumer；它跑通与否，**不改变**「同一份 WIT + 同一个 `button.wasm`」
 这一事实，也不改变契约。
+
+---
+
+## 六、P2 补充：capability 注入点（**不是实现，更不是验证**）
+
+P2 把 React Native 放进「一个 Component、多种 Host capability 实现」的图景里。
+本目录新增 `capability/storage.js`，标出 RN 侧该换的是哪一行：
+
+| | 状态 |
+| --- | --- |
+| RN capability injection point exists | ✅ 文件在 |
+| RN runtime（Hermes 加载 jco 产物） | ⚠️ **unverified** —— 与 P1 完全一致，P2 没有碰这一环 |
+| RN capability implementation verified | ❌ **没有**。代码存在 ≠ runtime 验证 |
+
+**所以本仓不写「RN Capability implemented ✅」。** 上面第三行才是事实。
+
+### 为什么 RN 的 capability 实现是内存 Map，而不是 AsyncStorage
+
+契约是**同步**的：
+
+```wit
+get: func(key: string) -> result<option<string>, store-error>;
+set: func(key: string, value: string) -> result<_, store-error>;
+```
+
+`AsyncStorage` 的每个方法都返回 Promise。把异步 API 接进同步契约只有两条路：
+
+1. **内存 Map + 异步落盘**（写穿缓存）—— 代价是冷启动 hydration 有竞态，
+   需要 Host 在实例化组件**之前** await 一次预热。
+2. **把契约改成 async** —— 会级联 wasmtime + wit-bindgen + jco + Metro；
+   而且 `future<T>` 在当前工具链实测不可用（`wasm-tools validate` 报
+   `future requires the component model async feature`，jco 报 canonical ABI 不匹配）。
+
+**这两条路都不在 P2 回答。** 该不该让 Capability Contract 变成 async，
+应当由实验结果决定，而不是先入为主的 API 设计。记一笔，留给 P3。
+
+真要在 RN 上跑，起手仍是第四节那条止损线：先用 `jco transpile --js` 绕开 `WebAssembly`，
+再谈 capability。

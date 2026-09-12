@@ -13,6 +13,9 @@ WIT package 使用 `spark:<module>@<version>` 形式：
 
 - `spark:core@0.1.0` — 核心领域契约（`wit/core.wit`，骨架）。
 - `spark:runtime@0.4.0` — 组件运行时契约（`wit/runtime.wit`）：`plugin` 接口（`info` 元数据 + `transform` 返回 `result<string, plugin-error>`，错误带结构化 `code`/`message`；Agent 调用面 `schema` 工具清单 + `invoke(tool, args)` 结构化调用）+ `plugin-world` 世界。插件 = 导出此世界的组件。
+- `spark:ui@0.1.0` — 跨端域组件契约（`wit/ui.wit`）：`button` 接口 + `domain-world` 世界，零 import。
+- `spark:capability@0.1.0` — **能力契约**（`wit/capability.wit`）：`storage` 接口（`get`/`set`，错误 `store-error` 区分 `unavailable`/`denied`）。**这是边界，不是实现**——实现由各 Host 提供。
+- `spark:store@0.1.0` — 用了能力的域组件（`wit/store.wit`）：`counter-store` 接口 + `store-world` 世界，`import spark:capability/storage@0.1.0`。
 - 未来按领域拆模块：`spark:order@x.y.z`、`spark:identity@x.y.z` 等，一个模块一个 package。
 
 ## 3. 契约优先工作流（idea 落地第一步）
@@ -45,3 +48,8 @@ WIT package 遵循语义化版本（semver）：
 - **宿主（`spark-host`）= 沙箱加载器**：只做加载 / 调用 / 捕获，不写领域逻辑；插件 panic（trap）必须当作可恢复错误处理，宿主进程不崩、实例间互不污染。
 - 新增插件 = 新增一个满足契约的组件，宿主零改动。
 - 新增领域逻辑优先进 `spark-core`；只有某边界层独有的逻辑才留在该 crate。
+- **Capability = 契约 + 多个 Host 实现。** 组件只 `import` 能力契约（如 `spark:capability/storage`），
+  **不碰任何介质**；介质（进程内 map / localStorage / 原生存储 / 服务端）由各 Host 决定。
+  换实现只改 Host，**组件不重新编译**——这是 P2 的核心判据。
+- **Capability 的 key 是裸 key。** 命名空间前缀（`ns:key`）属于 **Host 的实例策略**，
+  **不是** `spark:capability/storage` 的语义。契约只说「按 key 读写」。

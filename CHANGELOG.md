@@ -5,6 +5,60 @@
 
 ## [未发布]
 
+## P2 · Capability Contract Spike
+
+> 命题：一个 Component **import** 的 Capability，能不能由不同 Host 提供不同实现，
+> 而 **Component 本身完全不改变**？
+> P1 = `Component → 多个 Host`；P2 = `Component → Capability Contract → 多个 Host Implementation`。
+
+### 新增
+
+- **能力契约 `wit/capability.wit`**（`spark:capability@0.1.0`）：`storage` 接口 —— `get: func(key) -> result<option<string>, store-error>` / `set: func(key, value) -> result<_, store-error>`，错误 `store-error { unavailable, denied }`。**`Ok(Some)` 有值 / `Ok(None)` 没有这个 key / `Err` 能力本身失败**，「缺失」与「失败」可区分。刻意独立成 package —— Capability 不属于 `spark:ui`。
+- **用能力的域组件 `wit/store.wit`**（`spark:store@0.1.0`，世界 `store-world`）：`counter-store` 接口，`import spark:capability/storage@0.1.0`。**没有 bump `spark:ui@0.1.0`** —— 那会让 P1 的 `button.wasm`（导出 `spark:ui/button@0.1.0`）变成孤儿。
+- **`components/counter-store`**：headless 计数器，状态写穿到 capability；构造时从 capability 读回。独立 cargo workspace，跨 package 依赖走 `[package.metadata.component.target.dependencies]`（cargo-component 不自动读 `deps/`）。
+- **`spark-host/src/domain_store.rs`**：第二个宿主侧 capability 实现 —— `Backend`（进程内 map / `read_only`），`impl spark::capability::storage::Host`。CLI 新增 `store <wasm> <n> [--deny]`，打印 `count`（本实例数到几）与 `reloaded`（**新实例读到什么**）。
+- **`hosts/web/src/capability/storage.js`**：Web 侧实现 = `localStorage`。无痕模式 / 存储被禁时 localStorage 自己就抛，天然是真实错误路径。App 新增 P2 区块，与 P1 区块同页对照。
+- **`hosts/rn/capability/storage.js`**：RN 侧**注入点**（同步内存 Map）。⚠️ **标出的是「换哪一行」，不是已验证的实现** —— RN runtime 与 P1 一致，仍是 unverified。
+
+### 验收（P2 交付判据）
+
+| # | 结果 | 判据 |
+| --- | --- | --- |
+| ① | 契约 | `spark:capability@0.1.0` 独立 package；`spark:ui@0.1.0` 零改动 |
+| ② | 一份 artifact | `counter-store.wasm` 一次构建，sha256 `85691b8e…` |
+| ③ | **Rust Backend PASS** | 同一 wasm + 进程内 map → `store <wasm> 3` → `count: 3` / `reloaded: 3` |
+| ④ | **Web Browser PASS** | 同一 wasm + localStorage → 真实 Chrome 点击 P2×3，刷新后仍是 `3`（同页 P1 刷新回 `0`） |
+| ⑤ | 错误路径 | 同一 wasm + 只读后端 / 打断 localStorage 写入 → `count: 3` / `reloaded: 0` |
+| ⑥ | 换实现不改组件 | ③④⑤ 用的是**同一份未被重新编译的 wasm** |
+| ⑦ | P1 完好 | 35 个原测试全绿；P1 的 WIT / 组件 / 宿主代码零 diff |
+| ⑧ | RN | injection point exists / **runtime unverified** |
+
+**⑤ 的精确措辞**：*set failure is observable through a subsequent fresh instance*。
+**不是**「get/set 错误处理已验证」—— 组件侧压根没处理 `Err` 分支。
+
+**两种「不变」是两件事**：P1 的 `button.wasm` 是 **byte-for-byte 不变**（零 diff 证明）；
+P2 的 `counter-store.wasm` 是 **只构建一次、换实现不重新编译**（sha256 相同证明）。
+
+### 变更
+
+- `spark-host/src/lib.rs`：抽出 `sandbox_limits()` 作为沙箱资源上限的**唯一来源**，`new_store` 改为调用它（签名与行为不变）。新增的第二类宿主 Store 复用它，避免安全参数漂移。
+- `build-ui.sh`：构建两个组件（各一次）+ 契约自检 + **打印两个 wasm 的 sha256** + 分别转译到 `hosts/web/src/generated/{button,store}` + 把 capability 实现拷进产物目录（`jco --map` 生成的是字面相对 import）。
+- `CONTRACT.md` §2/§5：登记两份新契约；写明 Capability = 契约 + 多个 Host 实现，且 **key 命名空间是 Host 的实例策略，不是契约语义**。
+
+### 测试
+
+- 新增 `spark-host/tests/domain_store.rs`（3 个）：状态跨实例存活 / 命名空间隔离 / 只读后端下 `Err` 可观测。
+- 合计 38 个测试全绿（35 原测试未改 + 3 新增），`cargo fmt --check` 与 `cargo clippy --workspace --all-targets` 干净。
+
+### P2 明确不做（留给 P3）
+
+- **不回答 `AsyncStorage` 的同步/异步问题。** 契约是同步的、`AsyncStorage` 是 Promise；两条路（内存 Map + 异步落盘 / 契约改 async）都记一笔不选。`future<T>` 在本工具链实测不可用（`wasm-tools validate` 报 `future requires the component model async feature`）。该不该 async 应由实验结果决定，不是先入为主的 API 设计。
+- 不做 capability 的权限/授权模型；后端实现就是进程内 map（换 DB 只动 `domain_store.rs` 一个文件，这本身就是结论）。
+
+---
+
+## P1 · 跨端域组件（闭环）
+
 ### 新增
 
 - **跨端域组件（P1 闭环）**：新增第二份契约 `wit/ui.wit`（`spark:ui@0.1.0`，世界 `domain-world`）—— **刻意与 `plugin-world` 分开**，因为是两套信任模型（零 import 沙箱 vs 能力显式引入的域组件）。`plugin-world`、6 个插件与沙箱语义完全未动。

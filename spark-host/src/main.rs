@@ -2,9 +2,13 @@ use std::process::ExitCode;
 
 use spark_host::agent::{run_agent, AlgorithmPredictor, Predictor, MAX_STEPS};
 use spark_host::deepseek::DeepSeekPredictor;
+use spark_host::domain_store::{click_times, Backend};
 use spark_host::{Host, PipeFailure};
 
 const PLUGINS_DIR: &str = "plugins";
+
+/// Host 侧的 capability 命名空间：隔离策略属于宿主，组件发的是裸 key。
+const NS: &str = "counter-store";
 
 fn main() -> ExitCode {
     let host = match Host::new() {
@@ -21,10 +25,11 @@ fn main() -> ExitCode {
         [cmd, input, names @ ..] if cmd == "pipe" => pipe(&host, input, names),
         [cmd, prompt, rest @ ..] if cmd == "agent" => agent(&host, prompt, rest),
         [cmd, wasm, n] if cmd == "domain" => domain(&host, wasm, n),
+        [cmd, wasm, n, rest @ ..] if cmd == "store" => store(&host, wasm, n, rest),
         [wasm, input] => run_path(&host, wasm, input),
         _ => {
             eprintln!(
-                "usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list | domain <button.wasm> <n> | agent <prompt> [--model flash|pro] (agent 属 P5 未来层)"
+                "usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list | domain <button.wasm> <n> | store <counter-store.wasm> <n> [--deny] | agent <prompt> [--model flash|pro] (agent 属 P5 未来层)"
             );
             ExitCode::from(2)
         }
@@ -146,6 +151,51 @@ fn domain(host: &Host, wasm: &str, n: &str) -> ExitCode {
         }
         Err(e) => {
             eprintln!("domain trap: {e}");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+/// 域组件 + capability 命令：`spark-host store <counter-store.wasm> <n> [--deny]`。
+///
+/// 点 `n` 次，然后**新建一个实例**看它读到什么 —— 后者才是 capability 是否生效的证据：
+/// 健康存储 → 新实例读到 n；`--deny`（拒绝写入）→ 新实例读到 0。
+/// 两次实例化用的是**同一份未被重新编译的 wasm**。
+fn store(host: &Host, wasm: &str, n: &str, rest: &[String]) -> ExitCode {
+    let Ok(clicks) = n.parse::<u32>() else {
+        eprintln!("clicks 必须是 u32: {n}");
+        return ExitCode::from(2);
+    };
+    let deny = match rest {
+        [] => false,
+        [flag] if flag == "--deny" => true,
+        [other, ..] => {
+            eprintln!("未知参数: {other}");
+            return ExitCode::from(2);
+        }
+    };
+    let backend = if deny {
+        Backend::read_only()
+    } else {
+        Backend::new()
+    };
+    match click_times(host, wasm, clicks, NS, backend.clone()) {
+        Ok(count) => {
+            println!("count: {count}");
+            match click_times(host, wasm, 0, NS, backend.clone()) {
+                Ok(reloaded) => {
+                    println!("reloaded: {reloaded}");
+                    println!("stored: {} 条", backend.len());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("store trap: {e}");
+                    ExitCode::SUCCESS
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("store trap: {e}");
             ExitCode::SUCCESS
         }
     }

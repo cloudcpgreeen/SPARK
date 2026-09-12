@@ -6,13 +6,23 @@
 组件不知道自己在哪一端跑 —— UI 是宿主的事，状态与行为是组件的事。已闭环：
 
 ```bash
+# P1：状态住在组件实例里
 cargo run -p spark-host -- domain components/button/target/wasm32-unknown-unknown/release/button.wasm 3
 # count: 3                      ← Rust 后端（wasmtime），同一份 button.wasm
-cd hosts/web && npm install && npm run dev   # 浏览器里点 3 次 → 3（jco → ESM → React）
+
+# P2：组件 import 一个 capability，实现由各 Host 提供 —— 组件不重新编译
+cargo run -p spark-host -- store components/counter-store/target/wasm32-unknown-unknown/release/counter_store.wasm 3
+# count: 3        ← 本实例数到 3
+# reloaded: 3     ← 新实例从 capability 里读到 3
+
+cd hosts/web && npm install && npm run dev
+# 浏览器里：P1 区块点 3 次 → 3，刷新 → 0（状态在组件实例里）
+#           P2 区块点 3 次 → 3，刷新 → 3（状态经 capability 落在 localStorage 里）
 ```
 
-Component（共享的状态与行为）/ Host（平台适配与 UI）/ Capability（P2 的外部能力）三分，
-以及两套信任模型，见 [MANIFESTO.md §2](MANIFESTO.md) 与 [ROADMAP.md](ROADMAP.md)。
+Component（共享的状态与行为）/ Host（平台适配与 UI，**也是 Capability 的实现者**）/
+Capability（外部能力的**契约**）三分，以及两套信任模型，见
+[MANIFESTO.md §2](MANIFESTO.md) 与 [ROADMAP.md](ROADMAP.md)。
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![CI](https://github.com/cloudcpgreeen/SPARK/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudcpgreeen/SPARK/actions/workflows/ci.yml)
@@ -60,10 +70,10 @@ Component（共享的状态与行为）/ Host（平台适配与 UI）/ Capabilit
 
 - Cargo workspace：`spark-core`（无 HTTP 领域库）、`spark-host`（wasmtime 宿主）。
 - `spark-plugin`：插件组件（独立 workspace），产出零依赖 WASM 组件，导出 `spark:runtime/plugin`。
-- `wit/`：`core.wit`（`spark:core@0.1.0` 骨架）、`runtime.wit`（`spark:runtime@0.4.0`，`plugin-world` 契约：`transform` 返回 `result<string, plugin-error>`、`info` 带元数据，另有 Agent 调用面 `schema`/`invoke`）、`ui.wit`（`spark:ui@0.1.0`，`domain-world` 跨端域组件契约）。
-- `components/`：跨端域组件（独立 workspace）。`button` 是 headless 计数器，**同一份 `.wasm`** 跑 Rust 后端与 Web 前端（RN 运行时未验证，见 `hosts/rn/README.md`）。
-- `hosts/`：非 Rust 宿主。`web/`（Vite + React，经 jco 加载同一份 `button.wasm`）、`rn/`（spike 与结论）。
-- `build-ui.sh`：一次 Component build → 契约自检 → jco 转译为 Web 可 import 的 JS。
+- `wit/`：`core.wit`（`spark:core@0.1.0` 骨架）、`runtime.wit`（`spark:runtime@0.4.0`，`plugin-world` 契约：`transform` 返回 `result<string, plugin-error>`、`info` 带元数据，另有 Agent 调用面 `schema`/`invoke`）、`ui.wit`（`spark:ui@0.1.0`，`domain-world` 跨端域组件契约）、`capability.wit`（`spark:capability@0.1.0`，**能力契约** `storage`）、`store.wit`（`spark:store@0.1.0`，`store-world`：import 能力的域组件）。
+- `components/`：跨端域组件（独立 workspace）。`button` 是零 import 的 headless 计数器，**同一份 `.wasm`** 跑 Rust 后端与 Web 前端；`counter-store` import `spark:capability/storage`，**同一份 `.wasm`** 换 Host 实现不重新编译（RN 运行时未验证，见 `hosts/rn/README.md`）。
+- `hosts/`：非 Rust 宿主。`web/`（Vite + React，经 jco 加载同一份 `.wasm`，并在 `src/capability/` 里给出 capability 的 Web 实现）、`rn/`（spike 与结论 + capability 注入点）。
+- `build-ui.sh`：逐组件一次 Component build → 契约自检 → 打印 sha256 → jco 转译为 Web 可 import 的 JS。
 
 ## 快速上手
 
@@ -90,6 +100,30 @@ cd hosts/web && npm install && npm run dev     # 浏览器：点 3 次 → 3，�
 
 **同一个 Component artifact**，不是两次构建。jco 产出的 JS + core wasm 是 **Host 的适配产物**。
 浏览器里的 count 住在 wasm 里 —— React 只是把它画出来，不持有这个状态。RN 结论见 `hosts/rn/README.md`。
+
+### Capability：一个契约，多个 Host 实现（P2）
+
+`counter-store.wasm` **import** `spark:capability/storage@0.1.0`，但不知道它由谁实现：
+
+```bash
+./build-ui.sh
+WASM=components/counter-store/target/wasm32-unknown-unknown/release/counter_store.wasm
+
+cargo run -p spark-host -- store $WASM 3          # count: 3 / reloaded: 3   ← 后端进程内 map
+cargo run -p spark-host -- store $WASM 3 --deny   # count: 3 / reloaded: 0   ← 只读后端
+cd hosts/web && npm run dev                        # 浏览器：点 3 次 → 刷新 → 还是 3 ← localStorage
+```
+
+三处用的是**同一份未被重新编译的 wasm**（sha256 见 `build-ui.sh` 输出）。
+这就是 P2 的判据：**换 Capability 实现，组件不变。**
+
+**`reloaded` 是能力是否生效的证据** —— 新实例从 capability 里读到什么。
+错误路径的精确说法是 *set failure is observable through a subsequent fresh instance*，
+**不是**「错误处理已验证」：组件侧并没有处理 `Err` 分支。
+
+> ⚠️ **RN 不能写成「capability 已实现」。** `hosts/rn/capability/storage.js` 只是**注入点**，
+> RN runtime 与 P1 一致仍是 **unverified**。原因（同步契约 vs 异步 `AsyncStorage`）见
+> `hosts/rn/README.md` 第六节，**P2 只记录不回答**。
 
 ### Agent 回路（决策者 → 沙箱工具调用）
 

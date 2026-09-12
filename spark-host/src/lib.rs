@@ -31,6 +31,7 @@ use crate::exports::spark::runtime::plugin::{PluginError, PluginInfo, ToolSchema
 pub mod agent;
 pub mod deepseek;
 pub mod domain;
+pub mod domain_store;
 use anyhow::Result;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
@@ -249,13 +250,18 @@ impl Drop for Host {
     }
 }
 
+/// 沙箱资源上限的**唯一来源**：任何新建的宿主 Store 都必须复用它，避免参数漂移。
+pub(crate) fn sandbox_limits() -> StoreLimits {
+    StoreLimitsBuilder::new()
+        .memory_size(MEMORY_LIMIT)
+        .trap_on_grow_failure(true)
+        .build()
+}
+
 /// 新建带资源上限的 Store：内存上限 + 越界即 trap + epoch deadline。
 fn new_store(engine: &Engine) -> Store<HostData> {
     let host = HostData {
-        limits: StoreLimitsBuilder::new()
-            .memory_size(MEMORY_LIMIT)
-            .trap_on_grow_failure(true)
-            .build(),
+        limits: sandbox_limits(),
     };
     let mut store = Store::new(engine, host);
     store.limiter(|data| &mut data.limits);
