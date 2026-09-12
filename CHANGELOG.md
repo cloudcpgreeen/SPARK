@@ -5,6 +5,89 @@
 
 ## [未发布]
 
+## P4-1 · Capability 的状态所有权落回 Host
+
+> **唯一的核心问题**：当 Provider Component 自己不持有最终状态，而是把 Capability 继续向上委派时，
+> 状态能否真正回到 Host，并跨越 Provider / Domain Component 实例生命周期保持？
+> **P4-1 唯一新增的变量是 state ownership。**
+
+```
+counter-store → import storage → delegating-store → import storage → Host
+```
+
+### 新增
+
+**`spark-host/tests/delegating.rs`**（2 个测试）—— 本轮**唯一**新增的文件。
+
+**没有新增任何 Host 代码、WIT 或组件。** `store` 子命令（`main.rs:166`）本来就在跑
+「实例 A 点 n 次 → 实例 B 全新读回」这个协议；而 `composed-delegating.wasm` 的 world 与
+`store-world` 逐字相同（P4-0 G0.5/G0.6 已验），所以它直接就能吃，一行都不用改。
+
+### 验收（G1–G6，全绿）
+
+| # | gate | 观测 | 结果 |
+| --- | --- | --- | --- |
+| G1 | Provider 源码无状态声明 | `grep -E 'HashMap\|thread_local\|OnceLock\|Mutex\|RefCell\|Cell\|static'` → 无输出 | ✅ |
+| G2 | 组合边界 | `component wit` **恰好 2 行**：1 import + 1 export，无第三条 | ✅ |
+| G3 | Host binding 未变 | `git diff` 空；契约仍 `spark:capability@0.1.0` | ✅ **无独立观测项**，见下 |
+| G4 | 状态落在 Host | `stored: 1 条`（= Host `Backend` 的 `len()`） | ✅ |
+| G5 | 跨实例存活 | `reloaded: 3` | ✅ |
+| G6 | 反事实控制 | **同一个 Host** 上 P3 的 `composed.wasm` → `reloaded: 0` / `stored: 0 条` | ✅ |
+
+```
+cargo run -p spark-host -- store dist/composed-delegating.wasm 3
+# count: 3 / reloaded: 3 / stored: 1 条
+
+cargo run -p spark-host -- store dist/composed.wasm 3        # 对照
+# count: 3 / reloaded: 0 / stored: 0 条
+```
+
+一次 `store` 调用内部跑两次 `click_times` ⇒ 两个 `Store` ⇒ 两个 Component instance，
+中间没有任何东西共享内存 —— **只有 `Arc<Backend>` 是共享的**。那就是「销毁 A、创建 B」。
+
+**这个对照比 P3 的更强**：P3 的对照是「裸消费者 vs 空 Linker」；这里
+**同一个 Host、同一个 `Backend`、同一个 ns、同样点 3 次，唯一变量是 Provider**。
+`stored: 0 条` 是第二个独立观测 —— 它直接证明 Host **从未**看见那些写入。
+
+### 结论（P4-1 PASS）
+
+> A Provider Component may delegate a Capability to its Host **without owning the Capability state itself.**
+> State written through the delegated Capability **survives replacement of the Domain / Provider
+> Component instance**, because ownership remains at the Host boundary.
+
+**P3 与 P4 的关系由此解释清楚**：
+
+```
+P3    Capability → Provider Component → Provider-local state → 实例销毁 → 0
+P4-1  Capability → Provider Component → Host Capability → Host-owned state → 实例销毁 → 3
+```
+
+**P3 的 `reloaded: 0` 从「结论」降回「某个实现的后果」** —— 它从来不是 Component Model 的定律，
+只是 `mem-store` 把状态放在自己实例里的后果。
+
+### 措辞纪律：什么叫 durable
+
+**durable = survives replacement of the Component / Provider instance.**
+
+**不等于**：survives process restart / host restart / disk persistence / database durability。
+**`Host process restart → 未测试`。** 以后真做磁盘/数据库，那是 P4-2，单独定义。
+
+两处不许滑坡：
+- **G3 没有独立的可观测项**，它的证据是 G4 的 `stored:` 那一行（Host 的 `backend.len()`）——
+  不许把 G3 写成独立通过。
+- **G1 的 grep 只证明源码里没有状态声明**，证明不了「Provider 是无状态的」
+  （生成的 bindings 必然持有实例表之类）；行为的证据在 Host 一侧。
+
+### P4-1 明确不做（如实记录）
+
+- ❌ Web UI / RN / Remote Capability / async / `future<T>` / 数据库 / 网络 / Registry / CLI 扩展 / 新 Capability。
+- ❌ 不改 `wit/capability.wit`、`counter-store`、`mem-store`、`delegating-store`、P1–P3 冻结制品与测试。
+- `build-ui.sh` **未改**：脚本职责到「Web 宿主加载什么」为止，P4-1 没有 Web 宿主，等真有消费者再加。
+
+### 已知粗糙处
+
+- `dist/composed-delegating.wasm` **没有**进 `build-ui.sh`，靠上面那两条命令重现（dist/ 不入库）。
+
 ## P4-0 · Self-import / self-export preflight
 
 > **P4 开工前的单点风险 gate。** 唯一的问题是：

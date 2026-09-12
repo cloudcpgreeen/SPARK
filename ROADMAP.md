@@ -196,6 +196,40 @@ delegating-store.wasm  (同时 import 与 export storage)     ── wasm-tools 
 不设计 P4-1（不写 Host 绑定、不改 `build-ui.sh`、不加 CLI 子命令、不做 Web 区块）；
 不决定「外部 provider 是谁」；不碰 todo / RN / remote transport / async / 数据库。
 
+## P4-1 · Capability 的状态所有权落回 Host（**已完成**）
+
+**P4-1 的唯一新增变量是 state ownership。** 链路：
+
+```
+counter-store → import storage → delegating-store → import storage → Host
+```
+
+P4-0 只证了「那一行 import 存在」；P4-1 证的是**那一行是活的**。
+
+| # | gate | 观测 | 状态 |
+| --- | --- | --- | --- |
+| G1 | Provider 源码无状态声明 | grep → 无输出 | ✅ |
+| G2 | 组合边界 | `component wit` 恰好 1 import + 1 export | ✅ |
+| G3 | Host binding 未变 | `git diff` 空；契约仍 `spark:capability@0.1.0` | ✅（无独立观测项） |
+| G4 | 状态落在 Host | `stored: 1 条` | ✅ |
+| G5 | 跨实例存活 | `reloaded: 3` | ✅ |
+| G6 | 反事实控制（同一个 Host） | P3 的 `composed.wasm` → `reloaded: 0` / `stored: 0 条` | ✅ |
+
+```
+P3    Capability → Provider Component → Provider-local state → 实例销毁 → 0
+P4-1  Capability → Provider Component → Host Capability → Host-owned state → 实例销毁 → 3
+```
+
+**结论**：Provider Component 可以作为 Capability 的中间委派层，**而不必成为状态所有者**；
+当 Capability 最终由 Host 提供时，状态跨越实例生命周期保持。
+**P3 的 `reloaded: 0` 由此从「结论」降回「某个实现的后果」。**
+
+**durable 的定义（冻结）**：*survives replacement of the Component / Provider instance.*
+**不等于**进程重启 / 宿主重启 / 磁盘持久化 / 数据库；`Host process restart → 未测试`。
+
+**本轮没有新增任何 Host 代码、WIT 或组件** —— 只有 `spark-host/tests/delegating.rs`（2 个测试）。
+`store` 子命令本来就在跑「实例 A 点 n 次 → 实例 B 全新读回」这个协议。
+
 ## 后续 · 跨端 Domain Components
 
 把 Button 扩成真正成体系的域组件；验证组件间组合与前后端一致的行为。

@@ -183,8 +183,30 @@ imports  spark:capability/storage@0.1.0     ← 恰好这一个，无其他
 P3 的 `composed.wasm` 看似零 import，是因为边界正好被 Provider 吃掉了；
 一旦 Provider 自己也 import，边界就从它身上透出来。
 
-> **P4-0 is proven. P4 is NOT proven.** 这只证明「下一步不是建立在一个『也许工具链支持』的假设上」，
-> 不证明 Durable Capability 本身。P4-1 尚未开始。
+> **P4-0 is proven. P4 is NOT proven.** 这只证明「下一步不是建立在一个『也许工具链支持』的假设上」。
+
+### P4-1：状态所有权能不能落回 Host？（**已通过**）
+
+P4-0 只证了那一行 import **存在**；P4-1 证的是那一行是**活的**。
+Provider 只做转发、自己不持有任何状态，把 Capability 一路委派给 Host：
+
+```bash
+cargo run -p spark-host -- store dist/composed-delegating.wasm 3
+# count: 3 / reloaded: 3 / stored: 1 条
+
+cargo run -p spark-host -- store dist/composed.wasm 3        # 对照：P3 的 Provider 自己持有状态
+# count: 3 / reloaded: 0 / stored: 0 条
+```
+
+两个制品走的是**同一个 Host、同一个 `Backend`、同一个 ns、同样点 3 次** —— 唯一变量是 Provider。
+`reloaded: 3` 说明写入真的到了 Host 并被全新实例读到；`stored: 0 条` 在对照组里
+直接证明 Host **从未**看见那些写入。
+
+**结论**：Provider Component 可以是 Capability 的中间委派层，**而不是状态所有者**。
+**P3 的 `reloaded: 0` 由此从「结论」降回「某个实现的后果」。**
+
+> **durable 在这里只指**「跨 Component / Provider 实例存活」，**不指**进程重启、宿主重启、
+> 磁盘或数据库持久化。`Host process restart → 未测试`。
 
 ### Agent 回路（决策者 → 沙箱工具调用）
 
