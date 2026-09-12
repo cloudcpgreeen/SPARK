@@ -20,18 +20,20 @@ fn main() -> ExitCode {
         [cmd, name, input] if cmd == "run" => run_named(&host, name, input),
         [cmd, input, names @ ..] if cmd == "pipe" => pipe(&host, input, names),
         [cmd, prompt, rest @ ..] if cmd == "agent" => agent(&host, prompt, rest),
+        [cmd, wasm, n] if cmd == "domain" => domain(&host, wasm, n),
         [wasm, input] => run_path(&host, wasm, input),
         _ => {
             eprintln!(
-                "usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list | agent <prompt> [--model flash|pro]"
+                "usage: spark-host <plugin.wasm> <input> | run <name> <input> | pipe <input> <name>... | list | domain <button.wasm> <n> | agent <prompt> [--model flash|pro] (agent 属 P5 未来层)"
             );
             ExitCode::from(2)
         }
     }
 }
 
-/// Agent 命令：`spark-host agent "<prompt>" [--model flash|pro]`。
+/// Agent 命令（**P5 · 未来层，已冻结**）：`spark-host agent "<prompt>" [--model flash|pro]`。
 /// 不带 `--model` = 本地算法预测（离线，无需 Key）；带 `--model` = DeepSeek harness（需 `DEEPSEEK_API_KEY`）。
+/// 保留可用，但不在 P1 主线上迭代 —— Agent 只是另一种 Component Consumer，见 ROADMAP.md。
 fn agent(host: &Host, prompt: &str, rest: &[String]) -> ExitCode {
     let mut model = String::new();
     let mut i = 0;
@@ -126,6 +128,25 @@ fn pipe(host: &Host, input: &str, names: &[String]) -> ExitCode {
         Err(PipeFailure::Trap { step, detail }) => {
             eprintln!("✗ {step} 崩溃被沙箱捕获: {detail}");
             ExitCode::from(1)
+        }
+    }
+}
+
+/// 域组件命令：`spark-host domain <button.wasm> <n>` —— 沙箱内构造 counter，点 `n` 次，打印 count。
+/// 与 Web 宿主对照：同一个 `button.wasm`，各宿主各有实例与状态，共享的是契约与行为。
+fn domain(host: &Host, wasm: &str, n: &str) -> ExitCode {
+    let Ok(clicks) = n.parse::<u32>() else {
+        eprintln!("clicks 必须是 u32: {n}");
+        return ExitCode::from(2);
+    };
+    match spark_host::domain::click_times(host, wasm, clicks) {
+        Ok(count) => {
+            println!("count: {count}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("domain trap: {e}");
+            ExitCode::SUCCESS
         }
     }
 }

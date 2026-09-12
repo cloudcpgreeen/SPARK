@@ -1,0 +1,26 @@
+// SPARK 契约 · spark:ui（跨端 Domain Component）。
+//
+// 与 spark:runtime 是两套信任模型，刻意分开：
+//   - spark:runtime / plugin-world —— 零 import 的**不可信插件沙箱**（安全边界）；
+//   - spark:ui / domain-world      —— **前后端统一的域组件**，同一个组件跑 Rust 后端与 Web/RN 前端。
+//
+// 组件不知道自己在哪一端运行：UI 是宿主的事，状态与行为是组件的事。
+// P1 只导出、不 import 任何能力；外部能力（storage / remote API）属 P2。
+
+package spark:ui@0.1.0;
+
+/// 域组件：headless —— 只持有状态与行为，不含任何 UI 概念
+/// （无 disabled / label / style / event / render）。
+interface button {
+  /// 计数器：P1 的最小域状态与行为。`click` 自增，`count` 读取。
+  resource counter {
+    constructor();
+    click: func();
+    count: func() -> u32;
+  }
+}
+
+/// 世界：导出 button 接口。宿主（wasmtime / jco）自行实例化并驱动。
+world domain-world {
+  export button;
+}

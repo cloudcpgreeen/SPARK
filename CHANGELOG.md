@@ -3,6 +3,40 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- **跨端域组件（P1 闭环）**：新增第二份契约 `wit/ui.wit`（`spark:ui@0.1.0`，世界 `domain-world`）—— **刻意与 `plugin-world` 分开**，因为是两套信任模型（零 import 沙箱 vs 能力显式引入的域组件）。`plugin-world`、6 个插件与沙箱语义完全未动。
+- **`components/button`**：headless Button 计数器域组件（`constructor → click → count`，零 import，无 `disabled`/`label`/`style`/`event`/`render` 等任何 UI 概念）。独立 cargo workspace，`cargo component build --release` 产出 `button.wasm`。
+- **`spark-host/src/domain.rs`**：第二个 `bindgen!`（`domain-world`）+ `click_times()`，复用现有 Engine、组件编译缓存与 `new_store()` 的资源上限（内存 16 MiB + epoch 时间预算）。新增 CLI 子命令 `domain <button.wasm> <n>`。
+- **`hosts/web`**：Vite + React 宿主。`build-ui.sh` 一次 Component build → 契约自检（`jco wit` 确认零 import）→ `jco transpile` 转译。**React 不持有 count** —— 它只重渲染后向组件读值。
+- **`hosts/rn`** + `spike.sh`：RN spike 与如实结论（编译门 PASS / 运行时未验证）。
+- **`ROADMAP.md`**：P1–P5 路线图、Component / Host / Capability 三分、两套信任模型。
+
+### 验收（P1 交付判据）
+
+| # | 结果 | 判据 |
+| --- | --- | --- |
+| ① | `button.wasm` | 一次构建产出的唯一 Component artifact |
+| ② | **Rust Backend PASS** | 同一 wasm → wasmtime，`domain <wasm> 3` → `count: 3` |
+| ③ | **Web Browser PASS** | 同一 wasm → jco → React，真实 Chrome 点击 `0 → 3`、刷新回 `0` |
+| ④ | RN | 编译门 PASS、运行时未验证（`hosts/rn/README.md` 有失败模式与降级阶梯） |
+
+关键证据：`wit/ui.wit` → **一次** `cargo component build` → `button.wasm` → {Rust 宿主, Web 宿主}。
+jco 产出的 JS + core wasm 是 **Host 的适配产物**，不是第二个 Component。
+
+### 变更
+
+- **Agent 层冻结为 P5 · 未来层**：`agent.rs` / `deepseek.rs` 加模块级冻结注释，`agent` 子命令保留可用但帮助文本标注属未来层。**代码未删、33 个原测试保持全绿**。理由：Agent 只是另一种 Component Consumer，不该是架构核心。
+- `spark-host/src/lib.rs` 过期注释修正（`spark:runtime@0.3.0` → `0.4.0`）。
+- `.gitignore` 补 `components/*/src/bindings.rs`（原 `spark-plugin*/` 规则不覆盖新目录）与 `hosts/` 的 node_modules / 转译产物。
+
+### 测试
+
+- 新增 `spark-host/tests/domain.rs`：Button 域语义（点 3 次 → 3）+ 多实例互不污染。
+- 合计 35 个测试全绿（33 原测试未改 + 2 新增），`cargo fmt --check` 与 `cargo clippy --workspace --all-targets` 干净。
+
 ## [1.2.0] - 2026-08-25
 
 ### 新增

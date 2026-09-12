@@ -1,3 +1,9 @@
+//! **P5 · 未来层（已冻结，不在 P1 主线）**：Agent 不是架构核心，它只是**另一种 Component
+//! Consumer** —— 与 Web 宿主、Rust 后端宿主处于同一层次。等跨端域组件（`spark:ui` /
+//! `domain-world`）的契约站住，再接 Agent 会自然得多。
+//!
+//! 本文件**保留、测试保持通过、不再迭代**。解冻条件见 ROADMAP.md。
+//!
 //! SPARK Agent 回路：把 `plugins/` 下满足 `plugin-world` 的组件当作 LLM 可见的「工具」，
 //! 由 [`Predictor`] 决定下一步（现在 = 本地算法预测；将来 = DeepSeek harness 实现同一 trait）。
 //! 工具调用走宿主沙箱（epoch + StoreLimits），工具输出按**不可信数据**处理：截断 + 包装，

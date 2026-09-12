@@ -50,6 +50,10 @@ cargo run -p spark-host -- agent "把 hello 转大写" --model flash  # DeepSeek
 2. 实现，满足契约。
 3. `cargo test` 全绿后提交；提交消息用 conventional（`feat:` / `fix:` / `refactor:` …）。
 4. 交付门禁见 DEPLOYMENT.md。
+5. **P5（Agent）已冻结**：除非 ROADMAP 解冻，不新增 `agent.rs` / `deepseek.rs` 代码、不改其测试。
+   两个契约是两套信任模型，不要互相污染：`spark:runtime`（零 import 沙箱）保持零 import；
+   跨端域组件走 `spark:ui`，能力显式 import（P2 起）。
+6. **绝不为了让某个 Host 通过而改 WIT。** Host 是适配方，契约是权威方 —— 顺序不能反。
 
 ## 5. 测试纪律
 

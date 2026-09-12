@@ -1,6 +1,6 @@
 //! SPARK 宿主：沙箱加载满足 `plugin-world` 契约的 WASM 组件并调用插件接口。
 //!
-//! 契约见 `wit/runtime.wit`（`spark:runtime@0.3.0`）。插件导出 `spark:runtime/plugin`，
+//! 契约见 `wit/runtime.wit`（`spark:runtime@0.4.0`）。插件导出 `spark:runtime/plugin`，
 //! 不依赖宿主任何能力。宿主 bindgen 钉死契约版本：加载不匹配组件时 instantiate 直接失败。
 //! 插件 `transform` 返回 `result<string, plugin-error>`（`code`/`message` 结构化错误）：
 //! 声明式 `err`（值，可按 code 分支）与 panic（trap）都是可恢复错误，宿主不崩。
@@ -30,6 +30,7 @@ use crate::exports::spark::runtime::plugin::{PluginError, PluginInfo, ToolSchema
 
 pub mod agent;
 pub mod deepseek;
+pub mod domain;
 use anyhow::Result;
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};

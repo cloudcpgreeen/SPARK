@@ -22,7 +22,28 @@ SPARK 是**契约即 WIT 的组件运行时**：领域逻辑做成满足 WIT 契
 | --- | --- | --- |
 | 契约层 | `wit/*.wit`（WIT package） | 组件边界的唯一权威接口；定义语义与版本 |
 | 插件层 | 零依赖 WASM 组件 | 领域逻辑实现契约，导出 `plugin-world` |
-| 宿主层 | `spark-host`（wasmtime） | 沙箱加载 / 调用 / 捕获；不写领域逻辑 |
+| 宿主层 | `spark-host`（wasmtime）、`hosts/web`、`hosts/rn`（spike） | 沙箱加载 / 调用 / 捕获；不写领域逻辑 |
+
+### 2.1 三个概念的边界（比「代码能跑」更重要）
+
+| 概念 | 是什么 |
+| --- | --- |
+| **Component** | **共享的业务状态与行为**（headless，不含任何 UI 概念）—— 如 `button.wasm` |
+| **Host** | **平台适配与 UI / 运行环境** —— Rust+wasmtime / Web(Vite+React) / RN(Hermes) |
+| **Capability** | **外部能力**（storage / remote API），P2 才引入；P1 中没有 |
+
+**黄金不变量**：多端**不要求代码相同** —— 要求的是**契约相同、Component 相同、Domain 行为相同**；
+Host 可以完全不同。各 Host 各有实例与状态，共享的是契约与行为，**不是状态**。
+
+### 2.2 两套信任模型（刻意分开，互不污染）
+
+| world | 契约 | 信任模型 |
+| --- | --- | --- |
+| `plugin-world` | `spark:runtime@0.4.0` | **零 import 的不可信插件沙箱** —— 安全边界，戒律 3.3 在此生效 |
+| `domain-world` | `spark:ui@0.1.0` | **前后端统一的域组件** —— 同一个 `.wasm` 跑在 Rust 后端与 Web 前端（RN 见 `hosts/rn/README.md`），能力显式引入（P2 起） |
+
+一份契约、一个组件，可以同时是前端和后端的业务组件：**组件不知道自己在哪一端**。
+UI 是宿主的事，状态与行为是组件的事。
 
 ## 3. 核心理念（五条戒律）
 
@@ -89,17 +110,21 @@ SPARK 对不可信插件的立场：**默认不可信，一切攻击在沙箱内
 - 注册/发现：**插件自注册** —— 把 `.wasm` 组件放进 `plugins/` 即被 `Host::discover` 发现，`info().name` 就是注册名，宿主零配置文件
 - 并发模型：`Host` 长存（共享 Engine + 组件编译缓存 + 单 epoch bump 线程），每次调用新建独立 Store，可多线程并发，隔离不变
 - 安全加固：epoch CPU 上限 + StoreLimits 内存上限，`attacker` 的 CPU/内存炸弹被切断
-- Agent 回路：`agent` 命令两条路——默认 `AlgorithmPredictor` 本地算法预测（离线、无 Key）；`--model flash|pro` 走 `DeepSeekPredictor` harness（OpenAI 兼容 Chat Completions，模型 `deepseek-v4-flash`/`deepseek-v4-pro`，Key 只走 `DEEPSEEK_API_KEY` 环境变量、只进 `Authorization` 头）。跨插件编排按「然后/再」后的意图词二次调用（倒序→reverse、转大写→upper）。
+- **跨端域组件（P1 已闭环）**：`spark:ui@0.1.0` / `domain-world` —— headless Button 计数器（`constructor → click → count`，零 import、无任何 UI 概念）。**同一份 `button.wasm`** 跑通两端：Rust 后端（wasmtime）点 3 次 → `count: 3`；Web 浏览器（jco → ESM → React）现场点击 `0 → 3`、刷新回 `0`（状态住在组件里，React 不持有 count）。构建一次：`./build-ui.sh`。RN 见 `hosts/rn/README.md`（编译门 PASS，运行时未验证）。
+- Agent 回路（**P5 · 未来层，已冻结**）：`agent` 命令两条路——默认 `AlgorithmPredictor` 本地算法预测（离线、无 Key）；`--model flash|pro` 走 `DeepSeekPredictor` harness（OpenAI 兼容 Chat Completions，模型 `deepseek-v4-flash`/`deepseek-v4-pro`，Key 只走 `DEEPSEEK_API_KEY` 环境变量、只进 `Authorization` 头）。跨插件编排按「然后/再」后的意图词二次调用（倒序→reverse、转大写→upper）。代码保留、测试保持通过，但**不在当前决策路径上迭代**：Agent 只是另一种 Component Consumer。
 - 真实业务插件族：`idcard`（身份证校验）、`luhn`（银行卡校验）、`rmb`（人民币金额转大写，财会大写）。
 
 ### 路标
+- **P2 · Capability Import**：给 `spark:ui` 加 `import storage`，验证「组件不碰存储本身，只说存这个键」；存储实现由各 Host 提供。
+- **P3 · 跨端 Domain Components** / **P4 · Component Registry** / **P5 · AI Agent**（冻结中）。
 - 由真实业务插件继续驱动：更丰富错误语义（`plugin-error` 加字段，契约 `0.4.0 → 0.5.0`）、更多跨插件编排场景。
-- DeepSeek harness 已落地；下一步打磨真实网络场景（多轮工具调用、重试、用量统计），并用真实 Key 在 CI/手工验收。
+- 详见 [ROADMAP.md](ROADMAP.md)。
 
 ## 8. 文档索引
 
 | 文档 | 内容 |
 | --- | --- |
+| [ROADMAP.md](ROADMAP.md) | 路线图：P1–P5；Component / Host / Capability 三分；两套信任模型 |
 | [CONTRACT.md](CONTRACT.md) | 约定一：契约即 WIT；版本规则 |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 约定二：结构、构建测试、风格、流程 |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | 约定三：门禁、版本发布、运行配置 |

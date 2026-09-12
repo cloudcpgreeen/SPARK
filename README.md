@@ -2,6 +2,18 @@
 
 > 组件运行时：领域逻辑写成满足 `spark:runtime` 契约的 WASM 组件，宿主沙箱加载调用。契约即 WIT。
 
+**同一份 WIT 契约 + 同一个 Wasm Component，可以同时是 Web / React Native 前端和 Rust 后端的统一业务组件。**
+组件不知道自己在哪一端跑 —— UI 是宿主的事，状态与行为是组件的事。已闭环：
+
+```bash
+cargo run -p spark-host -- domain components/button/target/wasm32-unknown-unknown/release/button.wasm 3
+# count: 3                      ← Rust 后端（wasmtime），同一份 button.wasm
+cd hosts/web && npm install && npm run dev   # 浏览器里点 3 次 → 3（jco → ESM → React）
+```
+
+Component（共享的状态与行为）/ Host（平台适配与 UI）/ Capability（P2 的外部能力）三分，
+以及两套信任模型，见 [MANIFESTO.md §2](MANIFESTO.md) 与 [ROADMAP.md](ROADMAP.md)。
+
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![CI](https://github.com/cloudcpgreeen/SPARK/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudcpgreeen/SPARK/actions/workflows/ci.yml)
 [![GitHub tag](https://img.shields.io/github/v/tag/cloudcpgreeen/SPARK)](https://github.com/cloudcpgreeen/SPARK/releases)
@@ -11,6 +23,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [`MANIFESTO.md`](MANIFESTO.md) | 圣经 · 理念宣言：项目为什么存在、是什么、边界在哪、怎么保护自己 |
+| [`ROADMAP.md`](ROADMAP.md) | 路线图：P1–P5；Component / Host / Capability 三分；两套信任模型 |
 | [`CONTRACT.md`](CONTRACT.md) | 约定一 · 契约：接口即契约，契约即 **WIT**；契约优先工作流与版本规则 |
 | [`DEVELOPMENT.md`](DEVELOPMENT.md) | 约定二 · 开发：项目结构、构建测试、代码风格、新增功能流程 |
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | 约定三 · 交付：交付门禁、版本发布、运行/配置/安全 |
@@ -47,7 +60,10 @@
 
 - Cargo workspace：`spark-core`（无 HTTP 领域库）、`spark-host`（wasmtime 宿主）。
 - `spark-plugin`：插件组件（独立 workspace），产出零依赖 WASM 组件，导出 `spark:runtime/plugin`。
-- `wit/`：`core.wit`（`spark:core@0.1.0` 骨架）、`runtime.wit`（`spark:runtime@0.4.0`，`plugin-world` 契约：`transform` 返回 `result<string, plugin-error>`、`info` 带元数据，另有 Agent 调用面 `schema`/`invoke`）。
+- `wit/`：`core.wit`（`spark:core@0.1.0` 骨架）、`runtime.wit`（`spark:runtime@0.4.0`，`plugin-world` 契约：`transform` 返回 `result<string, plugin-error>`、`info` 带元数据，另有 Agent 调用面 `schema`/`invoke`）、`ui.wit`（`spark:ui@0.1.0`，`domain-world` 跨端域组件契约）。
+- `components/`：跨端域组件（独立 workspace）。`button` 是 headless 计数器，**同一份 `.wasm`** 跑 Rust 后端与 Web 前端（RN 运行时未验证，见 `hosts/rn/README.md`）。
+- `hosts/`：非 Rust 宿主。`web/`（Vite + React，经 jco 加载同一份 `button.wasm`）、`rn/`（spike 与结论）。
+- `build-ui.sh`：一次 Component build → 契约自检 → jco 转译为 Web 可 import 的 JS。
 
 ## 快速上手
 
@@ -59,7 +75,26 @@ cargo run -p spark-host -- run upper "hello"      # 按名字运行（沙箱内�
 
 示例插件 `Upper`：输入转大写；输入以 `trap` 开头时触发 panic，宿主以 trap 捕获、进程不崩（沙箱隔离）；输入以 `err` 开头时返回声明式错误（值，不是崩溃）。
 
+### 跨端域组件：同一份 `.wasm`，两种宿主
+
+`button.wasm` 是 headless 的计数器域组件（`constructor → click → count`，零 import、无任何 UI 概念）。
+构建一次，分发给各宿主：
+
+```bash
+./build-ui.sh                                 # 一次 Component build + 契约自检 + jco 转译
+WASM=components/button/target/wasm32-unknown-unknown/release/button.wasm
+
+cargo run -p spark-host -- domain $WASM 3     # Rust 后端：count: 3
+cd hosts/web && npm install && npm run dev     # 浏览器：点 3 次 → 3，刷新 → 0
+```
+
+**同一个 Component artifact**，不是两次构建。jco 产出的 JS + core wasm 是 **Host 的适配产物**。
+浏览器里的 count 住在 wasm 里 —— React 只是把它画出来，不持有这个状态。RN 结论见 `hosts/rn/README.md`。
+
 ### Agent 回路（决策者 → 沙箱工具调用）
+
+> **P5 · 未来层，已冻结**：Agent 只是另一种 Component Consumer，不在当前主线上迭代。见 [ROADMAP.md](ROADMAP.md)。
+
 
 插件对 LLM 暴露为**工具**（`schema()`/`invoke()`）。`agent` 命令两条路：默认**本地算法预测**决策（无需网络、无需 API Key）；加 `--model flash|pro` 走**真实 DeepSeek harness**（需 `DEEPSEEK_API_KEY` 环境变量，Key 只进 `Authorization` 头）：
 

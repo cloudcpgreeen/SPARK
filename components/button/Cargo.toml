@@ -1,0 +1,19 @@
+[package]
+name = "button"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreeen/SPARK"
+description = "SPARK 跨端域组件：headless Button 计数器（同一组件跑 Rust 后端 / Web / RN）"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen-rt = "0.41"
+
+[package.metadata.component]
+package = "spark:ui"
+
+# 独立于根 workspace：仅由 `cargo component build` 构建，根 `cargo build`/`cargo test` 不触碰。
+[workspace]

@@ -1,3 +1,6 @@
+//! **P5 · 未来层（已冻结，不在 P1 主线）**：见 [`crate::agent`]。本文件保留、测试保持
+//! 通过、不再迭代。
+//!
 //! DeepSeek harness：实现 [`crate::agent::Predictor`]，接 OpenAI 兼容的 DeepSeek Chat Completions API。
 //! 真正干活时的决策者——把插件工具清单（`schema()`）发成 function calling，让 LLM 决定调哪个工具。
 //!

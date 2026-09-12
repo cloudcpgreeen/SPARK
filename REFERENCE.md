@@ -36,6 +36,31 @@ interface health {
 }
 ```
 
+### 1.3 `spark:ui@0.1.0`（wit/ui.wit）—— 跨端域组件契约
+
+**第二个 world，刻意与 `plugin-world` 分开**（两套信任模型）：
+
+```
+package spark:ui@0.1.0;
+
+interface button {
+  resource counter {
+    constructor();
+    click: func();
+    count: func() -> u32;
+  }
+}
+
+world domain-world {
+  export button;
+}
+```
+
+- **零 import**（P1 只导出）。无 WASI、无任何 UI 概念 —— headless 是刻意的。
+- 同一个 `button.wasm` 同时是 Rust 后端与 Web / RN 前端的业务组件（见 ROADMAP.md 的 Component / Host / Capability 三分）。
+- 宿主绑定：Rust 侧 `spark-host/src/domain.rs` 的第二个 `bindgen!`；JS 侧 `jco transpile`。
+- `resource counter` → jco 生成 `class Counter { constructor(); click(): void; count(): number }` —— 自然映射，无需 Host adapter。
+
 ## 2. 宿主公开 API（spark-host）
 
 类型（bindgen 生成，路径 `crate::exports::spark::runtime::plugin::{PluginInfo, PluginError}`；生成类型**不实现 `PartialEq`**）。
@@ -51,6 +76,17 @@ interface health {
 | `Host::pipe(&self, dir: &str, input: &str, names: &[&str]) -> Result<String, PipeFailure>` | 输出串联；`PipeFailure::Declined{step, error}` 声明式失败，`PipeFailure::Trap{step, detail}` trap（`detail` 含 wasm backtrace） |
 | `Host::schemas(&self, dir: &str) -> Vec<(String, PluginInfo, Vec<ToolSchema>)>` | Agent 调用面：发现目录下所有插件的工具清单 `(文件名, 插件信息, schema)`，沙箱内读 `schema()`；失败跳过并提示 |
 | `Host::invoke(&self, wasm_path: &str, tool: &str, args_json: &str) -> Result<(PluginInfo, Result<String, PluginError>)>` | Agent 调用面：沙箱内调 `info()` + `invoke(tool, args_json)`，隔离与资源上限同 `run` |
+
+### 2.2 域组件（`spark_host::domain`）
+
+第二个 `bindgen!`：`path = "../wit/ui.wit"`, `world = "domain-world"`。世界零 import ⇒ 用空 `Linker`。
+Store 走同一个 `new_store()`（内存 16 MiB + epoch 预算），因此跨端组件的沙箱语义与插件路径一致。
+
+| 签名 | 语义 |
+| --- | --- |
+| `domain::click_times(host: &Host, wasm_path: &str, clicks: u32) -> Result<u32>` | 新建 Store + 空 Linker + instantiate → 构造 `counter` → 调 `clicks` 次 `click()` → 返回 `count()` |
+
+每次调用都是新 Store + 新实例：**状态住在组件实例里，宿主不持有**，实例互不污染。
 
 ### 2.1 Agent 回路（`spark_host::agent`）
 
@@ -115,7 +151,8 @@ spark-host <plugin.wasm> <input>        # 直接给组件路径运行
 spark-host run <name> <input>           # 按 info().name 运行（从 plugins/ 发现）
 spark-host pipe <input> <name>...       # 流水线：输出串联，fail-fast 定位
 spark-host list                         # 发现并列出 plugins/ 下的组件
-spark-host agent "<prompt>" [--model flash|pro]  # Agent 回路：本地算法预测决策 + 沙箱工具调用
+spark-host domain <button.wasm> <n>     # 域组件：沙箱内点 n 次，打印 count
+spark-host agent "<prompt>" [--model flash|pro]  # Agent 回路（P5 未来层，已冻结）
 ```
 
 | 输出态 | 格式 | 退出码 |
