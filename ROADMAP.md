@@ -25,6 +25,7 @@ Host 可以完全不同。各 Host 各有实例与状态（后端点 3 次 → 3
 | `domain-world` | `spark:ui@0.1.0` | **前后端统一的域组件**，目前仍零 import |
 | `store-world` | `spark:store@0.1.0` | **显式import `spark:capability/storage`** 的域组件（P2 起） |
 | `provider-world` | `spark:mem-store@0.1.0` | **实现** `spark:capability/storage` 的组件，零 import（P3 起） |
+| `delegating-provider-world` | `spark:delegating-store@0.1.0` | **同时 import 与 export** `spark:capability/storage` 的 Provider，把能力委派给下一层（P4-0 起） |
 
 ---
 
@@ -121,7 +122,7 @@ mem-store.wasm      (Provider, 导出 storage，零 import)  ──────�
 | ② 对照 | 这条路真的是空的 | 裸 `counter-store.wasm` 在**同一个空 Linker** 上必须失败 | ✅ |
 | ③ | 代价是作用域 | 同一份 `composed.wasm` → `reloaded: 0`（对照 P2 的 `3`） | ✅ |
 | ④ | 两个源制品不动 | `counter-store.wasm` sha256 不变；P2 宿主代码零 diff | ✅ |
-| ⑤ | 零 import 由工具强制 | `wasm-tools compose --no-imports`，不是肉眼观察 | ✅ |
+| ⑤ | 零 import：**实测** | `wasm-tools component wit` 观测 `composed.wasm` 为 0 imports | ✅ |
 | ⑥ | P2 完好 | 42 个测试全绿（38 原 + 4 新增）、fmt / clippy 干净 | ✅ |
 | ⑦ | Web | 真实 Chrome：P1 → 0、P2 → 3、P3 → 0；转译**无 `--map`** | ✅ |
 
@@ -130,6 +131,11 @@ mem-store.wasm      (Provider, 导出 storage，零 import)  ──────�
 
 **③ 的措辞**：Provider 把状态放在自己的实例内存里，所以组合后的能力状态是 instance-scoped。
 这是**本次实现的后果**，**不是** Component Model 的普遍定律。
+
+**勘误（P4-0 期）**：⑤ 原写「零 import 由 `--no-imports` **强制**」。实测该 flag 在
+wasm-tools 1.245.1 中是 **no-op**（带与不带产出字节相同，且带 flag 的组合产物仍保留 import），
+故**不能**作为因果依据。零 import 由 `component wit` 独立观测 ——
+**结论不变，理由已更正**；这是证据纠偏，不是重新打开 P3。
 
 ### P3 明确不做 / 留给后续
 
@@ -142,12 +148,63 @@ mem-store.wasm      (Provider, 导出 storage，零 import)  ──────�
 
 **P2 留下的待决**：Capability Contract 要不要 async。见上文 P2 末尾 —— 仍然挂着。
 
+## P4-0 · Self-import / self-export preflight（**已完成**）
+
+**这不是 P4，是 P4 开工前的单点风险 gate。** 唯一的问题：
+
+> **一个 Component 能否同时 import 和 export 同一个 WIT interface，并被 `wasm-tools compose` 正确组合？**
+
+三层（WIT 解析 / cargo-component 绑定生成 / wasm-tools compose）里任何一层不接受 → 停，不绕路。
+
+```
+counter-store.wasm  (import storage, P2 冻结)
+        +
+delegating-store.wasm  (同时 import 与 export storage)     ── wasm-tools compose ──>  composed-delegating.wasm
+                                                                                      export counter-store
+                                                                                      import storage ← 恰好这一个
+```
+
+| # | gate | 判据 | 状态 |
+| --- | --- | --- | --- |
+| G0.1/G0.2 | WIT 层 + cargo-component 接受「双栖」 | `cargo component build --release` → `delegating_store.wasm` | ✅ |
+| G0.3 | world 结构 | **同时**有 1 行 import 与 1 行 export，都是 `spark:capability/storage@0.1.0` | ✅ |
+| G0.4 | compose 成功 | 产出 `dist/composed-delegating.wasm` | ✅ |
+| G0.5 | imports **== 预期集合** | 恰好 1 行 `import spark:capability/storage@0.1.0` | ✅ |
+| G0.6 | unexpected imports **== ∅** | 除那一个外**没有别的 import** | ✅ |
+
+**G0.5/G0.6 比 P3 的 `imports == ∅` 更强** —— 两个方向都显式打印，
+验证的是**边界没有偷偷扩大**，不是只喊一句「相等」。
+
+### 结论
+
+同一个 WIT interface 可以同时被 import 与 export，当前工具链三层都接受；
+**组合没有消灭 capability 边界，而是把边界往上搬了一层**
+（P3 的 `composed.wasm` 看似零 import，只是因为边界正好被 Provider 吃掉了）。
+
+**P4-0 is proven. P4 is NOT proven.**
+
+### P4-0 的实测发现
+
+- 同一个 interface 的 import 侧与 export 侧生成**两个不同的 Rust 类型**
+  （`bindings::spark::…::StoreError` ≠ `bindings::exports::spark::…::StoreError`），
+  委派必须在值这一层转换一次；**但模块路径不撞**（`exports::` 前缀），
+  所以「工具链不支持双栖」这个担心不成立 —— 一个具体的工具链风险被划掉。
+- 组合产物 `composed-delegating.wasm` 与 `composed.wasm` 一样是 **derived artifact**，不是 Component 源。
+
+### P4-0 明确不做
+
+不设计 P4-1（不写 Host 绑定、不改 `build-ui.sh`、不加 CLI 子命令、不做 Web 区块）；
+不决定「外部 provider 是谁」；不碰 todo / RN / remote transport / async / 数据库。
+
 ## 后续 · 跨端 Domain Components
 
 把 Button 扩成真正成体系的域组件；验证组件间组合与前后端一致的行为。
 若要自动化 Web 验收，此时引入 Playwright。
 
 ## P4 · Component Registry
+
+> ⚠️ **本节已被重新校准的路线取代**（P4 改为 Durable Capability，`P4-0` 即其 preflight）。
+> 发现 / 版本 / 分发的问题没有消失，但不再是 P4 的定义。本节留待 P4-1 设计 gate 时统一整理。
 
 组件的发现 / 版本 / 分发。注意：不要靠提交 `hosts/web/src/generated/` 来分发 ——
 那是从契约派生的产物。正确做法是发布 npm 制品或 CI 上传构建产物。

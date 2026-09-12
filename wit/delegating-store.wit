@@ -1,0 +1,15 @@
+package spark:delegating-store@0.1.0;
+
+/// 一个**既导出、又导入** `spark:capability/storage@0.1.0` 的 Provider 组件：
+/// 它自己不做存储，把能力**委派**给下一层。
+///
+/// P4-0 只问工具链一个具体问题 —— **认不认这个形状**：
+/// 同一个 interface 同时出现在 import 与 export 两侧，能否被 cargo-component
+/// 生成、并被 wasm-tools compose 正确组合。**还不谈它委派给谁。**
+///
+/// 它不 bump `spark:capability`：接口身份不变，P2 的 `counter-store.wasm`
+/// 与 P3 的 `mem-store.wasm` 才都不是孤儿。
+world delegating-provider-world {
+  import spark:capability/storage@0.1.0;
+  export spark:capability/storage@0.1.0;
+}

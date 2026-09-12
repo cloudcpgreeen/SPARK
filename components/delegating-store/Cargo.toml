@@ -1,0 +1,24 @@
+[package]
+name = "delegating-store"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreeen/SPARK"
+description = "SPARK P4-0 preflight：一个**同时 import 与 export** spark:capability/storage 的 Provider 组件（把能力委派给下一层）"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen-rt = "0.41"
+
+[package.metadata.component]
+package = "spark:delegating-store"
+
+# cargo-component 不自动读 deps/：跨 package 依赖必须显式声明。
+# 这里两个方向都要 —— 既 import 又 export 同一个 interface。
+[package.metadata.component.target.dependencies]
+"spark:capability" = { path = "deps/capability" }
+
+# 独立于根 workspace：仅由 `cargo component build` 构建。
+[workspace]

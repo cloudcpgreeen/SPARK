@@ -5,6 +5,77 @@
 
 ## [未发布]
 
+## P4-0 · Self-import / self-export preflight
+
+> **P4 开工前的单点风险 gate。** 唯一的问题是：
+> **一个 Component 能否同时 import 和 export 同一个 WIT interface，并被 `wasm-tools compose` 正确组合？**
+> 三层（WIT 解析 / cargo-component 绑定生成 / wasm-tools compose）里任何一层不接受 → 停，不绕路。
+
+### 新增
+
+- **`wit/delegating-store.wit`**（`spark:delegating-store@0.1.0` / `delegating-provider-world`）：
+  **同一个 interface 同时出现在 import 与 export 两侧**。**不 bump `spark:capability`** ——
+  接口身份不变，P2 的 `counter-store.wasm` 与 P3 的 `mem-store.wasm` 才都不是孤儿。
+- **`components/delegating-store`**：一个**既导出、又导入** `spark:capability/storage@0.1.0`
+  的 Provider 组件，它自己不做存储、把能力**委派**给下一层。
+  P4-0 只问工具链认不认这个形状，**不谈它委派给谁**（那是 P4-1）。
+
+### 验收（gate G0.1–G0.6，全绿）
+
+| # | 结果 | 判据 |
+| --- | --- | --- |
+| G0.1/G0.2 | WIT 层与 cargo-component 接受「双栖」 | `cargo component build --release` 退出码 0 → `delegating_store.wasm`（sha256 `a0d5ce2e…`） |
+| G0.3 | 生成物的 world 结构 | world 里**同时**有 1 行 `import` 与 1 行 `export`，都是 `spark:capability/storage@0.1.0` |
+| G0.4 | compose 成功 | `counter-store.wasm` + `delegating-store.wasm` → `dist/composed-delegating.wasm` |
+| G0.5 | imports **== 预期集合** | 恰好 1 行：`import spark:capability/storage@0.1.0` |
+| G0.6 | unexpected imports **== ∅** | 全集只有那 1 个 import + `export spark:store/counter-store@0.1.0` |
+
+**G0.5/G0.6 比 P3 的 `imports == ∅` 更强**：两个方向都显式打印（该有的都在 / 不该有的一个都没有），
+这才是在验证**边界没有偷偷扩大**，而不是只喊一句「相等」。
+
+### 结论（P4-0 PASS）
+
+> A Component **may** import and export the same WIT interface.
+>
+> `cargo-component` accepts both `import spark:capability/storage@0.1.0` and
+> `export spark:capability/storage@0.1.0`; `wasm-tools compose` successfully composes
+> `counter-store` + `delegating-store`; the resulting component preserves **exactly** the
+> expected Capability boundary (`export spark:store/counter-store@0.1.0` /
+> `import spark:capability/storage@0.1.0`); **no unexpected imports were observed**.
+>
+> Therefore `Component → import Capability → Provider Component → export Capability`
+> is supported by the current toolchain.
+> **Composition does not inherently eliminate the Capability boundary; it can move that
+> boundary upward.**
+>
+> **P4-0 is proven. P4 is NOT proven.**
+
+### P4-0 的两个实测发现
+
+1. **同一个 interface 的 import 侧与 export 侧是两个不同的 Rust 类型。**
+   `bindings::spark::capability::storage::StoreError` ≠
+   `bindings::exports::spark::capability::storage::StoreError` —— 结构同、名字同、类型不同，
+   委派必须在值这一层做一次转换（编译器 E0308 逼出来的）。
+   **但模块路径不撞**（靠 `exports::` 前缀分开）。所以「工具链不接受同一 interface 双栖」这个担心不成立。
+2. **组合把边界往上搬了一层，而不是消灭它。**
+   P3 的 `composed.wasm` 零 import，是因为边界正好被 Provider 吃掉；
+   P4-0 的 `composed-delegating.wasm` 露出 1 个 import，是因为 Provider 底下还站着一个 Provider ——
+   同一个组合技巧，边界只是从更下一层透出来。
+
+### P4-0 明确不做（如实记录）
+
+- **不设计 P4-1**：不写 Host 绑定、不改 `build-ui.sh`、不加 CLI 子命令、不做 Web 区块。
+- 不决定「外部 provider 是谁」；不碰 todo / RN / remote transport / async / 数据库。
+- **未动** `components/mem-store`、`components/counter-store`、`wit/capability.wit`、
+  P1–P3 宿主代码、`build-ui.sh`、REFERENCE.md。
+
+### 已知粗糙处
+
+- `build-ui.sh` 的 `--no-imports` 与 `REFERENCE.md` 里的同名字样**暂未改动** ——
+  那属于 P3 封板脚本，不是 P4-0 的范围。该 flag 实测为 no-op，见 P3 的勘误。
+- `wasm-tools compose` 已废弃（stderr 提示 `Please use wac instead`），
+  但 `wac` 需联网安装、本机不可用 —— 与 P3 记录的约束相同。
+
 ## P3 · Capability 的实现也可以是一个 Component
 
 > 命题：一个 Capability 的**实现者**，能不能本身也是一个 Component？
@@ -35,7 +106,7 @@
 | ② 对照 | 这条路真的是空的 | 裸 `counter-store.wasm` 在**同一个空 Linker** 上 trap：`imports instance spark:capability/storage@0.1.0, but a matching implementation was not found in the linker` |
 | ③ | 代价是作用域 | 同一份 `composed.wasm` → `reloaded: 0`，对照 P2 的 `3` |
 | ④ | 两个源制品不动 | `counter-store.wasm` sha256 仍 `85691b8e…`；P2 的 `domain_store.rs` / `Backend` 零 diff |
-| ⑤ | 零 import 由工具强制 | `wasm-tools compose --no-imports` 通过，不是我肉眼观察的 |
+| ⑤ | 零 import：**实测** | `composed.wasm` 经 `wasm-tools component wit` 观测为 **0 imports**，不是肉眼观察 |
 | ⑥ | P2 完好 | 42 个测试全绿（38 原 + 4 新增），`cargo fmt --check` 与 `cargo clippy --workspace --all-targets` 干净 |
 | ⑦ | Web | 真实 Chrome：P1 刷新 → `0`、P2 刷新 → `3`、P3 刷新 → **`0`**；转译无 `--map` |
 
@@ -50,6 +121,13 @@
 **`composed.wasm` 是 derived artifact**（两个 Component 的组合产物，与 jco 转译产物同类），
 **不是**第三个 Component 源。「P2 的 `counter-store.wasm` 零重新编译」与「P1 的 `button.wasm` 字节不变」
 是两条不同的证明，不许混。
+
+**【P4-0 期勘误】⑤ 的原措辞「零 import **由工具强制**」是错的 —— 结论对，理由错。**
+A/B 实测（同一输入、只差这一个 flag）：`wasm-tools compose` 带与不带 `--no-imports`
+产出**字节完全相同**（sha256 均为 `1b8e5c07…`），且带 flag 的组合产物**仍保留 1 个 import** ——
+该 flag 在 wasm-tools 1.245.1 中**未产生任何约束效果**，因此**不能**作为零 import 的因果依据。
+零 import 是 compose **真的把 Provider 接上了**换来的，由 `wasm-tools component wit` 独立观测。
+**这是证据纠偏，不是重新打开 P3**：结论不变、制品不变、脚本与测试不变、sha256 不变。
 
 ### 变更
 
