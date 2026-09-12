@@ -79,8 +79,8 @@ Capability（外部能力的**契约**）三分，以及两套信任模型，见
 
 - Cargo workspace：`spark-core`（无 HTTP 领域库）、`spark-host`（wasmtime 宿主）。
 - `spark-plugin`：插件组件（独立 workspace），产出零依赖 WASM 组件，导出 `spark:runtime/plugin`。
-- `wit/`：`core.wit`（`spark:core@0.1.0` 骨架）、`runtime.wit`（`spark:runtime@0.4.0`，`plugin-world` 契约：`transform` 返回 `result<string, plugin-error>`、`info` 带元数据，另有 Agent 调用面 `schema`/`invoke`）、`ui.wit`（`spark:ui@0.1.0`，`domain-world` 跨端域组件契约）、`capability.wit`（`spark:capability@0.1.0`，**能力契约** `storage`）、`store.wit`（`spark:store@0.1.0`，`store-world`：import 能力的域组件）、`mem-store.wit`（`spark:mem-store@0.1.0`，`provider-world`：**实现**能力的 Provider 组件，零 import）、`delegating-store.wit`（`spark:delegating-store@0.1.0`，`delegating-provider-world`：**同时 import 与 export** 同一个能力的 Provider，P4-0）。
-- `components/`：跨端域组件（独立 workspace）。`button` 是零 import 的 headless 计数器，**同一份 `.wasm`** 跑 Rust 后端与 Web 前端；`counter-store` import `spark:capability/storage`，**同一份 `.wasm`** 换 Host 实现不重新编译；`mem-store` **导出** `spark:capability/storage`，零 import；`delegating-store` **既导出又导入**同一个能力（P4-0 preflight 对象）（RN 运行时未验证，见 `hosts/rn/README.md`）。
+- `wit/`：`core.wit`（`spark:core@0.1.0` 骨架）、`runtime.wit`（`spark:runtime@0.4.0`，`plugin-world` 契约：`transform` 返回 `result<string, plugin-error>`、`info` 带元数据，另有 Agent 调用面 `schema`/`invoke`）、`ui.wit`（`spark:ui@0.1.0`，`domain-world` 跨端域组件契约）、`capability.wit`（`spark:capability@0.1.0`，**能力契约** `storage`）、`store.wit`（`spark:store@0.1.0`，`store-world`：import 能力的域组件）、`mem-store.wit`（`spark:mem-store@0.1.0`，`provider-world`：**实现**能力的 Provider 组件，零 import）、`delegating-store.wit`（`spark:delegating-store@0.1.0`，`delegating-provider-world`：**同时 import 与 export** 同一个能力的 Provider，P4-0）、`forwarding-store.wit`（`spark:forwarding-store@0.1.0`，`forwarding-provider-world`：与上者**逐字相同**的纯委派 Provider，P4-2 用来叠第二条委派边界）。
+- `components/`：跨端域组件（独立 workspace）。`button` 是零 import 的 headless 计数器，**同一份 `.wasm`** 跑 Rust 后端与 Web 前端；`counter-store` import `spark:capability/storage`，**同一份 `.wasm`** 换 Host 实现不重新编译；`mem-store` **导出** `spark:capability/storage`，零 import；`delegating-store` **既导出又导入**同一个能力（P4-0 preflight 对象）；`forwarding-store` 与它语义逐字相同，只为多一层而存在（P4-2）（RN 运行时未验证，见 `hosts/rn/README.md`）。
 - `hosts/`：非 Rust 宿主。`web/`（Vite + React，经 jco 加载同一份 `.wasm`，并在 `src/capability/` 里给出 capability 的 Web 实现）、`rn/`（spike 与结论 + capability 注入点）。
 - `dist/composed.wasm`：**derived artifact** —— `build-ui.sh` 用 `wasm-tools compose --no-imports` 把 `mem-store.wasm` 组合进 `counter-store.wasm` 的产物。不是 Component 源，不入库。
 - `build-ui.sh`：逐组件一次 Component build → 契约自检 → 打印 sha256 → **组合并校验源制品不变** → jco 转译为 Web 可 import 的 JS。
@@ -207,6 +207,36 @@ cargo run -p spark-host -- store dist/composed.wasm 3        # 对照：P3 的 P
 
 > **durable 在这里只指**「跨 Component / Provider 实例存活」，**不指**进程重启、宿主重启、
 > 磁盘或数据库持久化。`Host process restart → 未测试`。
+
+### P4-2：多一条委派边界，所有权还在 Host 吗？（**已通过**）
+
+P4-1 只验证了**一级**委派。P4-2 在链上再叠一条纯委派边界（`forwarding-store`，
+world 与 `delegating-store` **逐字相同**），问 Provider 的**数量**会不会把所有权搬走：
+
+```bash
+cargo run -p spark-host -- store dist/composed-1hop.wasm 3   # Domain → B → Host
+# count: 3 / reloaded: 3 / stored: 1 条
+cargo run -p spark-host -- store dist/composed-2hop.wasm 3   # Domain → A → B → Host
+# count: 3 / reloaded: 3 / stored: 1 条
+cargo run -p spark-host -- store dist/composed.wasm 3        # 对照：P3 的 Provider 自持状态
+# count: 3 / reloaded: 0 / stored: 0 条
+```
+
+两个最终制品**共享同一个 `counter-store.wasm`、同一个 Host、同一个 `Backend`、
+同一个 ns、同一个 click protocol** —— **唯一的架构变量是：是否增加 Provider A 这一条委派边界。**
+
+> **结论**：在本次验证的两级纯委派 Provider 链中，增加一个 Provider 委派边界**不会改变**
+> Capability State 的 Host ownership；状态仍能跨越 Domain / Provider Component 实例替换而保持。
+
+⚠️ **`wasm-tools compose` 不做传递闭包**：`-d` 按顺序取**第一个**能满足 root import 的定义，
+**不追那个定义自己的 import**（定义是叶子）。所以一次 `-d A -d B` 造不出两跳链 ——
+**多跳只能「顺序组合两次」**。**这不是「compose 支持多跳」，恰恰相反：工具本身只做一跳。**
+
+> **不许外推**：两级证据支持不了「任意深度 Provider 链都保证 Host ownership」；
+> 「Provider 不持有状态」是本次实现的观测，不是 Component Model 的定律（P3 的 `mem-store`
+> 就是持有状态的 Provider）。`durable` 仍只指
+> *survives replacement of the Component / Provider instance*。**P4 至此封板**，
+> 不做第三 / 第四层 Provider；P5 是另一个问题，需另开 Design Gate。
 
 ### Agent 回路（决策者 → 沙箱工具调用）
 

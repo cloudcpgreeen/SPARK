@@ -5,6 +5,142 @@
 
 ## [未发布]
 
+## P4-2 · Multi-hop Capability Delegation
+
+> **唯一的核心问题**：Capability 经过**多个**纯委派 Provider Component 之后，
+> 状态是否仍由 Host 持有，并跨越整个 Provider 链的实例替换而保持？
+> **P4-2 唯一新增的变量是委派链上多一条 Provider 边界。**
+
+```
+P1    Component → Host                              PASS / FROZEN
+P2    Component → Capability → Host                 PASS / FROZEN
+P3    Component → Capability ← Component            PASS / FROZEN
+P4-0  import + export same Capability               PASS / FROZEN  9289898
+P4-1  Provider A → Host                             PASS / FROZEN  78b817c
+P4-2  Provider A → Provider B → Host                PASS ← 本轮
+```
+
+### 设计期发现：`wasm-tools compose` **不做传递闭包**
+
+动手前先做了只读探针（输出到 stdout，未写任何文件）：
+
+```
+A = compose(counter-store -d delegating-store)                → 顶层 1 import + 1 export
+B = compose(counter-store -d delegating-store -d mem-store)   → 与 A **字节相同**（sha 1aeeaea1…）
+C = compose(counter-store -d mem-store -d delegating-store)   → 顶层 0 import（= P3 的形状）
+```
+
+**A == B 而 A != C** ⇒ `-d` 的语义是：**按顺序取第一个能满足 root import 的定义，
+不追那个定义自己的 import —— 定义是叶子。** 顺序敏感本身就是「首个匹配生效」的独立印证。
+
+**后果**：一次 `-d A -d B` **造不出两跳链** —— A 接走 root 的 import，A 自己的 import
+变成悬空的顶层 import，产物退化成 P4-1 的制品。
+
+**方法：顺序组合两次**（同一个工具、同一个契约，只是施加两次）：
+
+```
+provider-chain-2hop = compose(delegating-store -d forwarding-store)    → import storage + export storage
+composed-2hop       = compose(counter-store    -d provider-chain-2hop) → export counter-store + import storage
+```
+
+设计期**唯一未能只读验证**的一步（把中间制品当 `-d` 喂给第二次组合）**已实测通过**：
+退出码 0，产物 world 正确。原本的推理依据 —— 该情形与 P4-1 的 compose 结构完全相同
+（root 的 import 由 definition 的 export 满足，definition 自身另有一个未满足的 import）—— 成立。
+
+### 新增
+
+| 文件 | 内容 |
+| --- | --- |
+| `wit/forwarding-store.wit` | Provider B 的 world，与 `spark:delegating-store@0.1.0` **逐字相同** |
+| `components/forwarding-store/` | 纯委派 Provider，源码是 `delegating-store` 的复制（约 40 行） |
+| `spark-host/tests/delegation_chain.rs` | 2 个测试 |
+
+**刻意不抽公共 crate**：只有两个实例，复制的成本低于抽象。二者一旦分化，说明实验控制被破坏。
+
+### 验收（G1–G7，全绿）
+
+| # | gate | 观测 | 结果 |
+| --- | --- | --- | --- |
+| G1 | Provider A = 已冻结的 `delegating-store` | 源码 sha256 `3c43b506…` 未变 | ✅ |
+| G2 | 新增 Provider B | `forwarding_store.wasm` 构建成功 | ✅ |
+| G3 | B 自己的形状 | `component wit` **恰好 2 行**：1 import + 1 export | ✅ |
+| G4① | `compose(A -d B)` | 退出码 0；中间制品 world 恰好 2 行 | ✅ |
+| G4② | 中间制品当 `-d` | 退出码 0；两个最终制品 world 逐字相同 | ✅ |
+| G5 | 两跳生命周期 | `reloaded: 3` / `stored: 1 条` | ✅ |
+| G6 | 反事实 | 一跳 = 两跳 = 3；P3 控制 = 0 | ✅ |
+| G7 | 源码无状态声明 | grep → 无输出 | ✅ |
+
+```
+cargo run -p spark-host -- store dist/composed-1hop.wasm 3   # Domain → B → Host
+# count: 3 / reloaded: 3 / stored: 1 条
+
+cargo run -p spark-host -- store dist/composed-2hop.wasm 3   # Domain → A → B → Host
+# count: 3 / reloaded: 3 / stored: 1 条
+
+cargo run -p spark-host -- store dist/composed.wasm 3        # P3 控制（Provider 自持状态）
+# count: 3 / reloaded: 0 / stored: 0 条
+```
+
+两个最终制品**共享同一个 `counter-store.wasm`、同一个 Host、同一个 `Backend`、
+同一个 namespace（`counter-store`）、同一个 click protocol**；
+**唯一的架构变量是：是否增加 Provider A 这一条委派边界。**
+（**不**简写成「唯一变量只有是否存在 Provider A」—— 最终 Wasm artifact 当然不同，
+这种简写会变成新的证据漏洞。）
+
+**G6 的强版本（已进测试）**：一跳与两跳**共享同一个还没被换掉的 `Backend` 实例** ——
+先用 `composed-1hop` 写 3，再用 `composed-2hop` 的全新实例去读同一个 `Backend`，直接读到 3，
+且 `backend.len()` 仍是 1（没有多出第二个键）。这比「两条命令各自跑都得到 3」硬：
+它证明**两个制品指向同一个 Host 状态位置**。
+
+**实例拓扑的准确说法**：A 与 B 在组合产物里是**内联**的，Host 只实例化一个组合组件 ——
+
+```
+fresh Store → fresh composed Component instance → 其内部包含 fresh 的 A、B 实例
+```
+
+**不能**写成 Host 分别实例化 A、B —— 那会给 Component Model 的实例拓扑制造错误直觉。
+
+### 结论（P4-2 PASS）
+
+> 在本次验证的两级纯委派 Provider 链中，增加一个 Provider 委派边界**不会改变**
+> Capability State 的 Host ownership；状态仍能跨越 Domain / Provider Component 实例替换而保持。
+
+> In the two-level pure-delegation chain verified here, adding one more Provider delegation
+> boundary **does not change** Host ownership of the Capability State; the state still survives
+> replacement of the Domain / Provider Component instances.
+
+**这条结论的边界（明确不许升级成）**：
+
+- ❌ 「任意深度 Provider 链都保证 Host ownership」—— 两级证据支持不了任意多级。
+- ❌ 「Component Model 保证 Provider 不持有状态」—— Provider 不持有状态是**本次实现的观测**，
+  不是 Component Model 的定律（对照 P3：`mem-store` 就是持有状态的 Provider）。
+- ❌ 「compose 支持多跳」—— 本次证据恰恰相反：**多跳靠顺序组合，工具本身只做一跳**。
+- ❌ `durable` 扩大解释 —— 仍只指 *survives replacement of the Component / Provider instance*；
+  不等于进程重启 / 宿主重启 / 磁盘 / 数据库，`Host process restart → 未测试`。
+
+**P4-2 的真正产出**：State ownership 被从 Component Model 里单独剥离出来了 ——
+
+```
+Component identity  ≠  Provider identity  ≠  Capability state ownership
+```
+
+Provider 可以是一条又一条纯委派边界，最终状态仍落在 Host；**Provider 本身可以完全没有最终状态**。
+
+### 工具行为事实（冻结）
+
+> 当前 `wasm-tools compose` **不会在一次 compose 中自动递归追踪 Provider 的 imports**；
+> 但可以通过 **sequential composition**，把多级 Provider 委派链**逐级内联**。
+
+`wasm-tools compose` 在 1.245.1 中已 deprecated（提示改用 `wac`），本机 `wac` 不可安装
+（需联网）。**如实记录为限制，不绕路。**
+
+### P4 封板
+
+P4-2 是 P4 的最后一步。**不做第三 / 第四层 Provider** —— 边际价值极低，
+且会把「证明多级委派仍保持 Host ownership」逐渐变成穷举实验。P4 的边界已经足够清楚。
+
+**P5 是另一个问题，不让 P4 的结论外溢到跨 Host** —— 需另开 Design Gate。
+
 ## P4-1 · Capability 的状态所有权落回 Host
 
 > **唯一的核心问题**：当 Provider Component 自己不持有最终状态，而是把 Capability 继续向上委派时，

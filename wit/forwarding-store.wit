@@ -1,0 +1,14 @@
+package spark:forwarding-store@0.1.0;
+
+/// P4-2 的 Provider B：world 与 `spark:delegating-store@0.1.0` **逐字相同** ——
+/// 同时 import 与 export `spark:capability/storage@0.1.0`，自己不做存储。
+///
+/// 它与 A 的差别**只在组合链里的位置**（A 在内、B 在外），不在形状。
+/// P4-2 要问的是：同一条纯委派边界**再叠一层**，Host ownership 会不会变。
+/// 所以 B 刻意不引入任何新概念、新 interface、新状态。
+///
+/// 不 bump `spark:capability`：接口身份不变，P2/P3/P4-1 的制品才都不是孤儿。
+world forwarding-provider-world {
+  import spark:capability/storage@0.1.0;
+  export spark:capability/storage@0.1.0;
+}

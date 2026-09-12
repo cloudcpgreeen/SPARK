@@ -26,6 +26,7 @@ Host 可以完全不同。各 Host 各有实例与状态（后端点 3 次 → 3
 | `store-world` | `spark:store@0.1.0` | **显式import `spark:capability/storage`** 的域组件（P2 起） |
 | `provider-world` | `spark:mem-store@0.1.0` | **实现** `spark:capability/storage` 的组件，零 import（P3 起） |
 | `delegating-provider-world` | `spark:delegating-store@0.1.0` | **同时 import 与 export** `spark:capability/storage` 的 Provider，把能力委派给下一层（P4-0 起） |
+| `forwarding-provider-world` | `spark:forwarding-store@0.1.0` | 与上者**逐字相同**的纯委派 Provider，用于在链上再叠一条边界（P4-2 起） |
 
 ---
 
@@ -229,6 +230,59 @@ P4-1  Capability → Provider Component → Host Capability → Host-owned state
 
 **本轮没有新增任何 Host 代码、WIT 或组件** —— 只有 `spark-host/tests/delegating.rs`（2 个测试）。
 `store` 子命令本来就在跑「实例 A 点 n 次 → 实例 B 全新读回」这个协议。
+
+## P4-2 · Multi-hop Capability Delegation（**已完成**）
+
+**命题**：P4-1 只验证了**一级**委派。P4-2 在链上再叠一条纯委派边界，
+问 **Provider 数量** 会不会改变 Host ownership。
+
+```
+counter-store → import storage → A(delegating-store) → import storage
+                                                     → B(forwarding-store) → import storage → Host
+```
+
+| # | gate | 观测 | 状态 |
+| --- | --- | --- | --- |
+| G1 | Provider A = 已冻结的 `delegating-store` | 源码 sha256 `3c43b506…` 未变 | ✅ |
+| G2 | 新增 Provider B | `forwarding-store.wasm` 构建成功 | ✅ |
+| G3 | B 自己的形状 | `component wit` 恰好 2 行：1 import + 1 export | ✅ |
+| G4① | `compose(A -d B)` | 退出码 0；中间制品 world 恰好 2 行 | ✅ |
+| G4② | 中间制品当 `-d` | 退出码 0；两个最终制品 world 逐字相同 | ✅ |
+| G5 | 两跳生命周期 | `reloaded: 3` / `stored: 1 条` | ✅ |
+| G6 | 反事实 | 一跳 = 两跳 = 3；P3 控制 = 0 | ✅ |
+| G7 | 源码无状态声明 | grep → 无输出 | ✅ |
+
+### ⚠️ 工具行为事实：`wasm-tools compose` **不做传递闭包**
+
+只读探针：`compose(store -d A)` 与 `compose(store -d A -d mem-store)` **字节相同**，
+而把两个 `-d` 对调就变成 P3 的形状（0 import）。⇒ **`-d` 按顺序取第一个能满足 root import
+的定义，不追那个定义自己的 import；定义是叶子。**
+
+**后果**：一次 `-d A -d B` 造不出两跳链。**多跳只能靠「顺序组合两次」** ——
+先把 A∘B 组合成中间制品，再拿它当 `-d` 喂给第二次 compose。
+
+**所以不能写成「compose 支持多跳」。** 本次证据恰恰相反：工具本身只做一跳。
+
+### 结论
+
+> 在本次验证的两级纯委派 Provider 链中，增加一个 Provider 委派边界**不会改变**
+> Capability State 的 Host ownership；状态仍能跨越 Domain / Provider Component 实例替换而保持。
+
+**不许升级成**：「任意深度 Provider 链都保证 Host ownership」（两级证据不支持任意多级）；
+「Component Model 保证 Provider 不持有状态」（这是本次实现的观测，不是模型定律 ——
+对照 P3：`mem-store` 就是持有状态的 Provider）。
+`durable` 的定义不变，仍**不等于**进程重启 / 宿主重启 / 磁盘 / 数据库。
+
+**实例拓扑**：A 与 B 在组合产物里是**内联**的 —— Host 只实例化一个组合组件。
+准确说法是 `fresh Store → fresh composed Component instance → 其内部含 fresh 的 A、B 实例`，
+**不是** Host 分别实例化 A、B。
+
+**P4-2 的真正产出**：State ownership 被从 Component Model 里单独剥离出来 ——
+`Component identity ≠ Provider identity ≠ Capability state ownership`。
+Provider 可以是一条又一条纯委派边界，最终状态仍落在 Host。
+
+**P4 至此封板**，不再做第三 / 第四层 Provider。
+**P5（同一 Domain Component 跨 Host）是另一个问题，不让 P4 的结论外溢**，需另开 Design Gate。
 
 ## 后续 · 跨端 Domain Components
 

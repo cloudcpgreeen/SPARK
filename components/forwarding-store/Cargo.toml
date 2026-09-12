@@ -1,0 +1,23 @@
+[package]
+name = "forwarding-store"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreeen/SPARK"
+description = "SPARK P4-2：Provider B —— 语义与 delegating-store 逐字相同的纯委派 Provider，用于叠出第二条委派边界"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen-rt = "0.41"
+
+[package.metadata.component]
+package = "spark:forwarding-store"
+
+# cargo-component 不自动读 deps/：跨 package 依赖必须显式声明。
+[package.metadata.component.target.dependencies]
+"spark:capability" = { path = "deps/capability" }
+
+# 独立于根 workspace：仅由 `cargo component build` 构建。
+[workspace]
