@@ -5,6 +5,182 @@
 
 ## [未发布]
 
+## P5 · Same Domain Component, Multiple Hosts
+
+> **核心问题**：同一个 Headless Domain Component，能否在不同 Host 上运行，
+> 并保持相同的 Domain 语义？
+> **不是**「两个 Host 共享状态」—— 恰恰相反：同一个不可变 artifact 被两个不同 Host
+> **独立**承载，Domain 语义相同，而 Host Capability 实现与状态可以不同。
+
+```
+P1    Component → Host                                  PASS / FROZEN
+P2    Component → Capability → Host                     PASS / FROZEN
+P3    Component → Capability ← Component                PASS / FROZEN
+P4    Provider chain → Host-owned State                 PASS / FROZEN  4997bba
+P5    SAME Component → DIFFERENT Hosts                  PASS ← 本轮
+```
+
+### P5 与 P1 的区别（不写这一句，P5 会被读成 P1 的复述）
+
+P1 已经证明过「同一份 artifact、两个 Host」—— 但 `button.wasm` 是**零 import** 的，
+它根本没碰到 Host。P5 新增的是 **capability 维度**：同一个 artifact **import 一个
+capability**，两个 Host 各给**不同实现**，而 Domain 行为一致。
+
+**P5 证的是 Capability abstraction survives host substitution。**
+
+### 设计期发现
+
+**① G1 按字面写法不成立，必须精确措辞。**
+Web Host 从不加载 `counter_store.wasm` —— 它加载的是 jco 的**派生产物**。
+能成立的精确版本是：**同一个冻结的 Component artifact 是两边共同的上游** ——
+Rust **直接加载**它，Web **以它为转译输入**。
+这与 P3 已冻结的 **derived artifact ≠ Component 源** 是同一条纪律，不是削弱。
+（不这样写，就会重演 `--no-imports` 那次的「结论对 ≠ 证明理由对」。）
+
+**② `build-ui.sh` 不能用来做 P5 的 Web 构建。** 它第 16 行无条件跑
+`cargo component build --release`（与 G1「禁止重新编译」冲突，且每次运行都可能覆盖
+冻结字节），第 51 行 `rm -rf hosts/web/src/generated` 会删掉产物。
+⇒ P5 有自己的脚本与输出目录（`hosts/web/src/generated-p5/`），**`build-ui.sh` 零 diff**。
+
+**③ 在 P5 之前，G1 这个值没有被任何东西断言过。**
+`build-ui.sh:32,46-52` 只是把 `counter-store.wasm` 和它在**同一次运行内**比对
+（证明的是「compose 不改消费者」，不是「等于这个常量」）；仓库里所有 `85691b8e…`
+都出现在文档里，手抄、还截断了；Rust 侧唯一的 `sha256` 字样在
+`spark-host/src/compose.rs:6`，是一句注释。
+新增 `verify-artifact.sh` 把它变成会失败的断言。
+
+**④ P1–P3 的 Web 验收从来没有自动化过。**
+`hosts/web/package.json` 只有 `dev`/`build`/`preview`，CI 两个 job 全是 Rust；
+所有「真实 Chrome：点 3 次 → 3」都是人眼看、手写进文档的散文。
+本轮第一次把它变成可断言的证据。**没有回头修改 P1–P3 的历史记录。**
+
+### 证据
+
+#### G1 — Artifact identity（**断言，不是打印**）
+
+`verify-artifact.sh` 在**转译前**断言，在**转译后**再断言一次：
+
+```
+OK: counter_store.wasm sha256 = 85691b8e50549e0608c893ef91836fb3f5056fa380e1e34236a9a93c33e7e584
+（... jco transpile ...）
+OK: counter_store.wasm sha256 = 85691b8e50549e0608c893ef91836fb3f5056fa380e1e34236a9a93c33e7e584
+```
+
+顺序本身就是证据：**同一个字节流是这次转译的输入**。
+
+#### G2 — Rust Host
+
+```bash
+cargo run -p spark-host -- store \
+  components/counter-store/target/wasm32-unknown-unknown/release/counter_store.wasm 3
+# count: 3 / reloaded: 3 / stored: 1 条
+```
+
+`store` 子命令**即使 trap 也返回 SUCCESS**，所以证据是匹配字面量，不是退出码。
+
+#### G3 / G4 — Web Host（自动化真浏览器）+ Domain 语义一致
+
+`hosts/web` 新增 `@playwright/test` 与 `p5.html` **独立入口**（不改 `App.tsx` ——
+它是 P1–P3 的证据载体）：
+
+```
+npx playwright test
+✓ G3/G4 · 同一个 artifact 在 Web Host 上跑出与 Rust Host 相同的 Domain 行为
+✓ G5 · deny 反事实：Domain 行为不变，只有持久性改变
+2 passed
+```
+
+`fresh BrowserContext` ⇒ localStorage 天然为空，且**把「初始渲染 0 + key 为 null」
+本身写成 hermeticity 断言**，不是约定。
+
+#### G5 — Capability 分离（**本轮最有价值的 gate**）
+
+两端都用**同一个、未重新编译的** artifact：
+
+```
+Rust Host（Backend::read_only）
+  normal → count: 3 / reloaded: 3 / stored: 1 条
+  deny   → count: 3 / reloaded: 0 / stored: 0 条
+
+Web Host（?deny=1，宿主侧的第二种 Capability 配置）
+  normal → 0 → click×3 → 3 → localStorage '3' → reload → 3
+  deny   → 0 → click×3 → 3   ← 硬判据第一步：Domain 行为仍成立
+                         → localStorage 仍为 null  ← 写入从未落地
+                         → reload → 0
+```
+
+**deny 下 `click ×3 → count 3` 仍然成立。** 所以被隔离出来的是
+「Domain 操作」与「Capability 状态机制」两个变量，
+**不是** *Capability 出错 → Component 出错*。
+
+**证据责任的归属（不许混淆）**：G3 的 `reload → 3` **只证明** Web Host 的
+localStorage Capability 在工作；**Domain 与 Capability 的分离由 G5 的反事实承担**。
+
+#### G6 — 不计入 PASS 含金量
+
+Rust 的进程内 `HashMap` 与浏览器 `localStorage` 不共享地址空间、存储介质与运行时，
+**结构上不可能失败**。保留为 **structural guarantee / sanity boundary**，
+**不包装成实验发现**。
+
+#### 计划外的 regression 证据
+
+`p5.html` 是新增的第二个 Vite 入口，实际在浏览器里验证了 P1–P3 的 demo 没有回归：
+
+```
+index.html 初始三段 count: [0, 0, 0]
+P2 点 3 次后:            [0, 3, 0]   localStorage counter-store:count = 3
+P2 刷新后:               [0, 3, 0]
+p5.html count: 0                     ← ns 是 p5-counter-store，与 P2 互不干扰
+```
+
+不作为正式 gate，也没有为了它回去改 P1–P3 的记录。
+
+### 结论（P5 PASS）
+
+> 同一个冻结的 Domain Component artifact（`counter-store.wasm`，SHA-256 `85691b8e…`，
+> 未经重新编译）被两个不同的 Host 承载：Rust/Wasmtime **直接加载**它，Web/jco
+> **以它为转译输入**得到 Host 侧适配产物。两边的 Domain 行为一致
+> （各自新建实例 → click ×3 → 3），而两边提供的 Capability 实现不同
+> （进程内 HashMap vs 浏览器 localStorage）。
+
+> G5 的反事实进一步表明，在两端更换为宿主侧 deny Capability 后，Domain 的
+> `click ×3 → count 3` 仍成立，但状态不再跨 fresh instance 保留（`reload → 0`）。
+> 因此，本次验证证明的是 **Domain 行为与 Capability 状态机制的分离**，
+> 而非 *Capability failure 导致 Domain 调用失败*。
+
+**核心一句**：
+
+> 同一个 Domain artifact，不要求同一个 Host，也不要求同一个 Capability implementation；
+> **Domain 与 Host Capability 的边界才是可移植性的核心。**
+
+**明确不许推出**：
+
+- ❌ 任意 Host 都可以承载 —— 本次验证的是这两个。
+- ❌ RN 已经通过 —— RN 只有编译门、没有 runtime proof，仍是独立的 Runtime Gate。
+- ❌ 同一份 Component 字节直接在浏览器中执行 —— 浏览器执行的是 jco 的**派生产物**。
+- ❌ 跨 Host 共享状态 —— 恰恰相反，P5 明确不共享（那会变成 Remote Capability）。
+- ❌ 「所有 Domain 在所有 Host 上都一致」—— 本次验证的是 counter 这一个 Domain 的行为。
+
+### 新增
+
+| 文件 | 内容 |
+| --- | --- |
+| `verify-artifact.sh` | G1：冻结 artifact 的 sha256 断言 |
+| `p5-web.sh` | P5 的 Web 构建（先断言 → 再 `jco transpile` → 再断言），刻意不走 `build-ui.sh` |
+| `hosts/web/p5.html`、`src/p5-main.tsx`、`src/P5App.tsx` | P5 的独立入口与页面 |
+| `hosts/web/src/capability/storage-p5.js` | P5 的 Web capability 实现：ns `p5-counter-store` + 宿主级 deny 开关 |
+| `hosts/web/playwright.config.ts`、`e2e/p5.spec.ts` | Web 验收自动化（2 个测试） |
+
+`hosts/web/src/generated-p5/` 是 derived artifact，不入库。
+**没有新增 Rust 测试**（46 个不变）；既有 `domain_store.rs` 已覆盖同一契约。
+
+### P5 明确不做
+
+**Web 不进 CI。** P5 证明的是**架构命题**，CI integration 是**工程化命题**。
+现在已经有 `test:p5` + Playwright + fresh BrowserContext + headless Chromium，
+足以形成可重复的本地证据。要把 Web 验收变成 CI gate，应另开一个很小的
+**P5-CI / Web Verification Gate**，而不是偷偷塞进 P5。
+
 ## P4-2 · Multi-hop Capability Delegation
 
 > **唯一的核心问题**：Capability 经过**多个**纯委派 Provider Component 之后，

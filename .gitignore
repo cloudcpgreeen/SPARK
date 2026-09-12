@@ -12,6 +12,12 @@ hosts/web/src/generated/
 hosts/*/node_modules/
 hosts/*/dist/
 
+# P5 的 jco 转译产物：由 p5-web.sh 从冻结的 counter_store.wasm 派生，同样是宿主的
+# 适配产物而非 Component 源。单独一个目录，好让 build-ui.sh 的 rm -rf 碰不到它。
+hosts/web/src/generated-p5/
+hosts/web/test-results/
+hosts/web/playwright-report/
+
 # P3 组合产物：由 build-ui.sh 把 mem-store.wasm 组合进 counter-store.wasm 派生而来，
 # 是 derived artifact 而非 Component 源，不入库。
 dist/

@@ -284,6 +284,81 @@ Provider 可以是一条又一条纯委派边界，最终状态仍落在 Host。
 **P4 至此封板**，不再做第三 / 第四层 Provider。
 **P5（同一 Domain Component 跨 Host）是另一个问题，不让 P4 的结论外溢**，需另开 Design Gate。
 
+## P5 · Same Domain Component, Multiple Hosts（**已完成**）
+
+**命题**：**同一个不可变 Domain Component artifact** 能不能被两个不同的 Host 承载，
+Domain 语义一致，而 Host Capability 的实现与状态各自独立？
+
+**这不是「两个 Host 共享状态」—— 恰恰相反，P5 明确不共享**（那会变成 Remote Capability）。
+
+### ⚠️ P5 与 P1 的区别（不写这句，P5 读起来就是 P1 的复述）
+
+P1 已经证明过「同一份 artifact、两个 Host」，但 `button.wasm` 是**零 import** 的 ——
+它根本没有碰到 Host。P5 真正新增的是 **capability 维度**：同一个 artifact **import 一个能力**，
+两个 Host 各给**不同实现**，而 Domain 行为一致。
+
+### 设计期发现（改掉了原设计）
+
+1. **「两个 Host 都用同一个文件」按字面不成立** —— Web Host 从不加载 `counter-store.wasm`，
+   它加载 jco 的派生产物。能成立的精确版本是：**同一个冻结 artifact 是两边共同的上游**，
+   Rust **直接加载**它，Web **以它为转译输入**。所以 G1 断言的是「**转译输入**的 sha」，
+   且在**转译之前**检查。（与 P3 已冻结的 `derived artifact ≠ Component 源` 是同一条纪律。）
+2. **`build-ui.sh` 不能用来做 P5 的 Web 构建** —— 它无条件重编译 `counter-store`，
+   与「禁止重新编译」直接冲突，且每次都 `rm -rf hosts/web/src/generated`。
+   ⇒ P5 另开 `p5-web.sh` 与 `src/generated-p5/`。**`build-ui.sh` 一个字未改。**
+3. **此前仓库里没有任何一处断言这个冻结 sha** —— `build-ui.sh` 的 hash 是**同一次运行内和自己比**。
+   ⇒ 新增 `verify-artifact.sh`：唯一 artifact identity 入口，两条 Host 路径都先跑它。
+4. **Web 验收从来没有自动化过** —— P1–P3 的「点 3 次 → 3」都是人眼看、手写进文档的散文。
+   ⇒ 本轮第一次变成可断言的脚本。
+
+| # | gate | 观测 | 状态 |
+| --- | --- | --- | --- |
+| G1 | artifact identity | 转译**前**＋**后** `verify-artifact.sh` 均 OK，sha = `85691b8e…` | ✅ |
+| G2 | Rust/Wasmtime 直接加载 | `count: 3` / `reloaded: 3` / `stored: 1 条` | ✅ |
+| G3 | Web/jco 承载（Playwright headless Chromium） | `0` → click ×3 → `3` → `localStorage '3'` → reload → `3` | ✅ |
+| G4 | Domain 语义一致 | 两端各自 fresh 实例 → click ×3 → `3` | ✅ |
+| G5 | Capability 实现可以不同（反事实） | Rust deny：`3 / 0 / 0 条`；Web deny：`0` → click ×3 → `3` → localStorage 仍 `null` → reload → `0` | ✅ |
+| G6 | State 独立 | **结构性保证，不可能失败** ⇒ **不计入 PASS** | — |
+
+### 结论
+
+> 同一个冻结的 Domain Component artifact（`counter-store.wasm`，SHA-256 `85691b8e…`，
+> 未经重新编译）被两个不同的 Host 承载：Rust/Wasmtime **直接加载**它，Web/jco **以它为转译输入**
+> 得到 Host 侧适配产物。两边的 Domain 行为一致（各自新建实例 → click ×3 → 3），
+> 而两边提供的 Capability 实现不同（进程内 HashMap vs 浏览器 localStorage）。
+
+> G5 的反事实进一步表明，在两端更换为宿主侧 deny Capability 后，Domain 的
+> `click ×3 → count 3` **仍成立**，但状态不再跨 fresh instance 保留（`reload → 0`）。
+> 因此本次验证证明的是 **Domain 行为与 Capability 状态机制的分离**，
+> 而非 Capability failure 导致 Domain 调用失败。
+
+**核心句**：同一个 Domain artifact，不要求同一个 Host，也不要求同一个 Capability implementation；
+**Domain 与 Host Capability 的边界才是可移植性的核心。**
+
+### 证据含义的边界（不许滑坡）
+
+- **G3 的 `reload → 3` 只证明** Web Host 的 localStorage Capability 在工作。
+  **它本身不是**「Domain 与 Capability 分离」的证明 —— 那由 **G5 的反事实**承担。
+- **G5 的顺序不可颠倒**：必须**先**证明坏 Capability 下 `click ×3 → count 3` 仍成立，
+  再证明 `reload → 0`。若第一步不成立，证明的是 *capability failure propagation*，
+  **不是**想证的「状态持久性由 Capability 决定、Domain 行为仍然存在」。
+- Web 侧的「坏 capability」是**宿主侧的第二种配置**，**不是**「组件处理了错误分支」。
+  精确说法仍是 *set failure is observable through a subsequent fresh instance*。
+- **G6 不可能失败**（进程内 `HashMap` vs `localStorage`：不共享介质、不共享地址空间），
+  因此是结构性保证，**不算实验结果**。
+
+**不许外推**：
+
+- ❌ 「任意 Host 都可以承载」—— 本次验证的是这两个。
+- ❌ 「RN 已经通过」—— RN 只有编译门，没有 runtime proof，另立 Runtime Gate。
+- ❌ 「同一份 Component 字节直接在浏览器中执行」—— 浏览器执行的是 jco 的**派生产物**；
+  相同的是**转译输入**。
+- ❌ 「跨 Host 共享状态」—— P5 明确不共享。
+
+**Web 不进 CI**：P5 证明的是**架构命题**，CI integration 是**工程化命题**，两者不该混在一个 gate 里。
+另开一个很小的 *P5-CI / Web Verification Gate*，而不是偷偷塞进 P5。
+（P5 页面目前是 dev-only，不进 `vite.config.ts` 的 production 入口。）
+
 ## 后续 · 跨端 Domain Components
 
 把 Button 扩成真正成体系的域组件；验证组件间组合与前后端一致的行为。
@@ -298,6 +373,11 @@ Provider 可以是一条又一条纯委派边界，最终状态仍落在 Host。
 那是从契约派生的产物。正确做法是发布 npm 制品或 CI 上传构建产物。
 
 ## P5 · AI Agent（**冻结中**）
+
+> ⚠️ **本节与上面的 P5 不是同一件事**。上面的 P5 是**重新校准后的路线**里的
+> 「同一个 Domain Component，多个 Host」（已完成）；本节是**旧编号**下被冻结的 Agent 层，
+> 保留原样作为历史记录。Agent 的定位（另一种 Component Consumer）没有变，
+> 只是它在校准后的路线里**不再是 P5**。
 
 `spark-host/src/agent.rs` 与 `spark-host/src/deepseek.rs` 已加模块级冻结注释：
 代码保留、测试保持通过、**不再迭代**。`spark-host agent` 子命令仍可用，但帮助文本已标注属未来层。

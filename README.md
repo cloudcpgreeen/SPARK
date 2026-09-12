@@ -81,9 +81,11 @@ Capability（外部能力的**契约**）三分，以及两套信任模型，见
 - `spark-plugin`：插件组件（独立 workspace），产出零依赖 WASM 组件，导出 `spark:runtime/plugin`。
 - `wit/`：`core.wit`（`spark:core@0.1.0` 骨架）、`runtime.wit`（`spark:runtime@0.4.0`，`plugin-world` 契约：`transform` 返回 `result<string, plugin-error>`、`info` 带元数据，另有 Agent 调用面 `schema`/`invoke`）、`ui.wit`（`spark:ui@0.1.0`，`domain-world` 跨端域组件契约）、`capability.wit`（`spark:capability@0.1.0`，**能力契约** `storage`）、`store.wit`（`spark:store@0.1.0`，`store-world`：import 能力的域组件）、`mem-store.wit`（`spark:mem-store@0.1.0`，`provider-world`：**实现**能力的 Provider 组件，零 import）、`delegating-store.wit`（`spark:delegating-store@0.1.0`，`delegating-provider-world`：**同时 import 与 export** 同一个能力的 Provider，P4-0）、`forwarding-store.wit`（`spark:forwarding-store@0.1.0`，`forwarding-provider-world`：与上者**逐字相同**的纯委派 Provider，P4-2 用来叠第二条委派边界）。
 - `components/`：跨端域组件（独立 workspace）。`button` 是零 import 的 headless 计数器，**同一份 `.wasm`** 跑 Rust 后端与 Web 前端；`counter-store` import `spark:capability/storage`，**同一份 `.wasm`** 换 Host 实现不重新编译；`mem-store` **导出** `spark:capability/storage`，零 import；`delegating-store` **既导出又导入**同一个能力（P4-0 preflight 对象）；`forwarding-store` 与它语义逐字相同，只为多一层而存在（P4-2）（RN 运行时未验证，见 `hosts/rn/README.md`）。
-- `hosts/`：非 Rust 宿主。`web/`（Vite + React，经 jco 加载同一份 `.wasm`，并在 `src/capability/` 里给出 capability 的 Web 实现）、`rn/`（spike 与结论 + capability 注入点）。
+- `hosts/`：非 Rust 宿主。`web/`（Vite + React，经 jco 加载同一份 `.wasm`，并在 `src/capability/` 里给出 capability 的 Web 实现；P5 另开第二入口 `p5.html` + `src/generated-p5/`，**不动** `App.tsx` / `index.html` / `vite.config.ts`）、`rn/`（spike 与结论 + capability 注入点）。
 - `dist/composed.wasm`：**derived artifact** —— `build-ui.sh` 用 `wasm-tools compose --no-imports` 把 `mem-store.wasm` 组合进 `counter-store.wasm` 的产物。不是 Component 源，不入库。
 - `build-ui.sh`：逐组件一次 Component build → 契约自检 → 打印 sha256 → **组合并校验源制品不变** → jco 转译为 Web 可 import 的 JS。
+- `verify-artifact.sh`（P5 G1）：**唯一**的 artifact identity 入口 —— 断言 `counter_store.wasm` 的 sha256 就是冻结值 `85691b8e…`，不等即 `exit 1`。两条 Host 路径都先跑它。
+- `p5-web.sh`（P5）：**不调 `build-ui.sh`**（那脚本会重编译 `counter-store` 并 `rm -rf hosts/web/src/generated`）。顺序是 `verify-artifact.sh` → jco 转译 **转译前再验一次 sha** → 把 `storage-p5.js` 放进 `generated-p5/` 作为宿主的 capability 适配产物。
 
 ## 快速上手
 
@@ -238,9 +240,46 @@ cargo run -p spark-host -- store dist/composed.wasm 3        # 对照：P3 的 P
 > *survives replacement of the Component / Provider instance*。**P4 至此封板**，
 > 不做第三 / 第四层 Provider；P5 是另一个问题，需另开 Design Gate。
 
+### P5：同一个 Domain artifact，两个 Host（**已通过**）
+
+P4 封板后，P5 独立回答**另一个**问题：同一个**不可变** Domain Component artifact，
+能不能被两个不同 Host 承载，Domain 语义一致，而 Capability 实现各自不同？
+
+⚠️ 这**不是**「两个 Host 共享状态」—— 恰恰相反，P5 明确不共享。
+也**不是** P1 的复述：`button.wasm` 是零 import、根本没碰到 Host；P5 新增的是 **capability 维度**。
+
+```bash
+./verify-artifact.sh                          # G1：先断言转译输入就是冻结的那份 sha
+cargo run -p spark-host -- store \
+  components/counter-store/target/wasm32-unknown-unknown/release/counter_store.wasm 3
+# count: 3 / reloaded: 3 / stored: 1 条
+
+./p5-web.sh                                   # jco 转译（不重编译 Domain）
+cd hosts/web && npm run test:p5               # G3/G4/G5：真实 headless Chromium
+```
+
+**同一个冻结的 Domain Component artifact（`counter-store.wasm`，SHA-256 `85691b8e…`，
+未经重新编译）被两个不同的 Host 承载**：Rust/Wasmtime **直接加载**它，Web/jco **以它为转译输入**
+得到 Host 侧适配产物。两边的 Domain 行为一致（各自新建实例 → click ×3 → 3），
+而两边提供的 Capability 实现不同（进程内 HashMap vs 浏览器 localStorage）。
+
+> **G5 反事实**（两端都换宿主侧 deny Capability）：Domain 的 `click ×3 → count 3` **仍成立**，
+> 但状态不再跨 fresh instance 保留（`reload → 0`）。⇒ 本次验证证明的是
+> **Domain 行为与 Capability 状态机制的分离**，而非 Capability failure 导致 Domain 调用失败。
+
+> **核心句**：同一个 Domain artifact，不要求同一个 Host，也不要求同一个 Capability implementation；
+> **Domain 与 Host Capability 的边界才是可移植性的核心。**
+
+> **不许外推**：❌ 任意 Host 都可以承载（本次验证的是这两个）❌ RN 已经通过（RN 只有编译门，
+> 另立 Runtime Gate）❌ 同一份 Component 字节直接在浏览器中执行（浏览器跑的是 jco 派生产物，
+> 相同的是**转译输入**）❌ 跨 Host 共享状态（P5 明确不共享）。
+> G6「state 独立」是结构性保证、不可能失败，**不计入 PASS**。
+
 ### Agent 回路（决策者 → 沙箱工具调用）
 
-> **P5 · 未来层，已冻结**：Agent 只是另一种 Component Consumer，不在当前主线上迭代。见 [ROADMAP.md](ROADMAP.md)。
+> **P5 · AI Agent · 未来层，已冻结**：这里的 P5 是**旧编号**下的 Agent 层，
+> 与上一节的 P5（同一 Domain Component 跨 Host）**不是同一件事**。
+> Agent 只是另一种 Component Consumer，不在当前主线上迭代。见 [ROADMAP.md](ROADMAP.md)。
 
 
 插件对 LLM 暴露为**工具**（`schema()`/`invoke()`）。`agent` 命令两条路：默认**本地算法预测**决策（无需网络、无需 API Key）；加 `--model flash|pro` 走**真实 DeepSeek harness**（需 `DEEPSEEK_API_KEY` 环境变量，Key 只进 `Authorization` 头）：
