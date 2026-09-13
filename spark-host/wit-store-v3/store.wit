@@ -1,0 +1,11 @@
+package spark:store-v3@0.3.0;
+
+/// G7：G6 选中的 `future<T>` 契约的 host 侧接线面。
+///
+/// 与 `wit-store/store.wit`（0.1.0 同步）**并存**，不替换它 —— 0.1.0 与它的
+/// `counter-store.wasm` 是冻结事实，原地改写会连带重编冻结制品。
+/// 本 world **只有 import、没有 export**：G7 只验证 binding 能被生成并编译，
+/// **不实现** async host（那是下一阶段）。
+world store-v3-world {
+  import spark:capability/storage@0.3.0;
+}

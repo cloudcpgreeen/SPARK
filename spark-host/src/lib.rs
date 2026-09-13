@@ -29,6 +29,7 @@ use std::time::Duration;
 use crate::exports::spark::runtime::plugin::{PluginError, PluginInfo, ToolSchema};
 
 pub mod agent;
+pub mod capability_v3;
 pub mod compose;
 pub mod deepseek;
 pub mod domain;
