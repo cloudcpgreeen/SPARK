@@ -18,8 +18,9 @@ rustup target add wasm32-unknown-unknown
 cargo install cargo-component --version 0.21.1 --locked
 
 # 只在构建 async Component（import spark:capability/storage@0.3.0 的 future<T>）时才需要。
-# 版本必须精确：这条路径的可重复性不靠 semver 运气。
-cargo install wasm-tools --version 1.259.0 --locked
+./tools/install-async-tools.sh
+# 等价于 `cargo install wasm-tools --version 1.259.0 --locked`，并再核对一次 PATH 上
+# 先命中的确实是 1.259.0 —— 装上了不等于用上了（见该脚本注释）。
 ```
 
 两条构建线服务不同的组件集合，互不影响：既有 0.1.0 同步组件走 `cargo-component`（各自 pin
