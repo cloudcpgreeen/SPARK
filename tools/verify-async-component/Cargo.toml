@@ -1,0 +1,17 @@
+[package]
+name = "verify-async-component"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreen/SPARK"
+description = "SPARK P7-P4.2 ①b：B 专用 verification host —— 消费 build-async.sh 刚产出的 future<T> 组件并跑真实 Wasmtime 链路"
+
+# B 专用、与 spark-host 并列：既有 spark-host 只开 component-model（0.1.0 同步线），
+# 这里需要 component-model-async 才能跑 0.3.0 的 async 组件。
+# 因此不改 spark-host/Cargo.toml —— 保持 additive。
+[dependencies]
+wasmtime = { version = "47", features = ["component-model", "component-model-async"] }
+futures = "0.3"
+
+# 独立于根 workspace：根 members 仍只有 spark-core / spark-host。
+[workspace]

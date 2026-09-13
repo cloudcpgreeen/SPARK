@@ -1,0 +1,6 @@
+package spark:verify-async-component@0.1.0;
+
+world w {
+  import spark:capability/storage@0.3.0;
+  export run: async func(key: string) -> string;
+}
