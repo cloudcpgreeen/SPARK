@@ -1,0 +1,8 @@
+package spark:capability@0.3.0;
+
+interface storage {
+  variant store-error { unavailable(string), denied(string), }
+
+  get: func(key: string) -> future<result<option<string>, store-error>>;
+  set: func(key: string, value: string) -> future<result<_, store-error>>;
+}

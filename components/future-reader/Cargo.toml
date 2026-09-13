@@ -1,0 +1,21 @@
+[package]
+name = "future-reader"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/cloudcpgreeen/SPARK"
+description = "SPARK P7-P4.1：B 路线的第一个 async Component（wit-bindgen + wasm-tools），import spark:capability/storage@0.3.0 的 future<T>"
+
+[lib]
+crate-type = ["cdylib"]
+
+# B 路线的生成器是 wit-bindgen 本身（其 rt 内嵌），不依赖 wit-bindgen-rt。
+# 精确 pin：这条路径的「可重复」不能靠 semver 运气。
+[dependencies]
+wit-bindgen = { version = "=0.62.0", features = ["async-spawn"] }
+
+# 刻意没有 [package.metadata.component]：本组件不由 cargo-component 构建。
+# 跨 package 依赖走 wit/deps/capability/，而不是 cargo-component 的 deps/ 约定。
+
+# 独立于根 workspace：仅由 build-async.sh 构建，根 cargo build/test 不触碰。
+[workspace]

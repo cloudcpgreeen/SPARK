@@ -1,0 +1,6 @@
+package spark:future-reader@0.1.0;
+
+world future-reader-world {
+  import spark:capability/storage@0.3.0;
+  export run: async func(key: string) -> string;
+}
