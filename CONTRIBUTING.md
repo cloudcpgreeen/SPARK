@@ -16,7 +16,16 @@
 ```bash
 rustup target add wasm32-unknown-unknown
 cargo install cargo-component --version 0.21.1 --locked
+
+# 只在构建 async Component（import spark:capability/storage@0.3.0 的 future<T>）时才需要。
+# 版本必须精确：这条路径的可重复性不靠 semver 运气。
+cargo install wasm-tools --version 1.259.0 --locked
 ```
+
+两条构建线服务不同的组件集合，互不影响：既有 0.1.0 同步组件走 `cargo-component`（各自 pin
+`wit-bindgen-rt 0.41`）；新增 async 组件走 `wit-bindgen` + `wasm-tools`（其 rt 内嵌，
+不依赖 `wit-bindgen-rt`）。为什么不用 `cargo-component` 建 async 组件：其内嵌的
+`wit-bindgen 0.41` 与当前 `future<T>` ABI 的 intrinsic 集合已错代。
 
 构建与测试命令见 [DEVELOPMENT.md §2](DEVELOPMENT.md)（`cargo test --workspace` + 逐个 `cargo component build --release`）。
 

@@ -41,6 +41,13 @@ cargo run -p spark-host -- domain <button.wasm> 3        # P1：count: 3
 cargo run -p spark-host -- store <counter-store.wasm> 3  # P2：count: 3 / reloaded: 3
 cargo run -p spark-host -- provide <mem_store.wasm> k v  # P3：got: v（Provider 组件实现能力）
 cargo run -p spark-host -- composed dist/composed.wasm 3 # P3：count: 3 / reloaded: 0（空 Linker）
+
+./build-async.sh            # 新增 async Component（spark:capability/storage@0.3.0 的 future<T>）
+                            # wit-bindgen 0.62 + wasm-tools 1.259.0（装法见 CONTRIBUTING §2）
+cargo build --release --manifest-path tools/verify-async-component/Cargo.toml
+tools/verify-async-component/target/release/verify-async-component \
+  components/future-reader/target/wasm32-unknown-unknown/release/future_reader.component.wasm
+                            # 消费刚产出的组件，跑真实 Wasmtime 链路，期望 "42"
 ```
 
 - **P3 的构建顺序不可省**：`./build-ui.sh` 里组合那一步会**断言** `counter-store.wasm` 组合前后 sha256 相同。
